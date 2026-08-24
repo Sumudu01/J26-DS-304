@@ -1,15 +1,56 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import { API_URL } from '../App.jsx'
 import { 
   TrendingUp, FileSearch, Milestone, CheckSquare, 
   User, Upload, BookOpen, GraduationCap, Briefcase, 
-  MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight
+  MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
+  LogOut, Bell, X
 } from 'lucide-react'
 
 function SeekerDashboard({ user, onUpdateUser, onLogout }) {
-  const [activeTab, setActiveTab] = useState('demand') // 'demand', 'gap', 'path', 'matching'
-  
+  const [activeTab, setActiveTab] = useState('demand') // 'demand', 'gap', 'path', 'matching', 'profile'
+
+  // Notification state
+  const [showNotifications, setShowNotifications] = useState(false)
+  const notifRef = useRef(null)
+  const [notifications, setNotifications] = useState([
+    { id: 1, type: 'match',   read: false, title: 'New Job Match!',           body: 'A new AI Engineer role at WSO2 matches your profile (92% score).', time: '2m ago' },
+    { id: 2, type: 'gap',     read: false, title: 'Skill Gap Alert',           body: 'You are missing TensorFlow — a top skill for your target role.', time: '1h ago' },
+    { id: 3, type: 'market',  read: false, title: 'Market Trend Update',       body: 'Generative AI demand index rose 14% this week on LinkedIn.', time: '3h ago' },
+    { id: 4, type: 'career',  read: true,  title: 'Career Path Milestone',     body: 'Complete 2 more Python projects to reach Senior ML Engineer level.', time: 'Yesterday' },
+    { id: 5, type: 'match',   read: true,  title: 'Application Viewed',        body: 'Your Easy Apply application to Dialog was viewed by the recruiter.', time: '2d ago' },
+  ])
+
+  const unreadCount = notifications.filter(n => !n.read).length
+
+  // Close notification panel when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setShowNotifications(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+  const dismissNotif = (id) => setNotifications(prev => prev.filter(n => n.id !== id))
+
+  const notifIconColor = {
+    match:  'bg-emerald-100 text-emerald-600',
+    gap:    'bg-amber-100 text-amber-600',
+    market: 'bg-blue-100 text-blue-600',
+    career: 'bg-purple-100 text-purple-600',
+  }
+  const notifIcon = {
+    match:  <CheckCircle2 className="h-4 w-4" />,
+    gap:    <FileSearch className="h-4 w-4" />,
+    market: <TrendingUp className="h-4 w-4" />,
+    career: <Milestone className="h-4 w-4" />,
+  }
+
   // Profile update state
   const [editSkills, setEditSkills] = useState(user.skills.join(', '))
   const [editTargetRole, setEditTargetRole] = useState(user.target_role || 'AI Engineer')
@@ -164,175 +205,220 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   return (
     <div className="flex-1 flex flex-col md:flex-row min-h-screen">
-      {/* Sidebar Controls */}
-      <aside className="w-full md:w-80 bg-white border-r border-gray-200 p-6 flex flex-col justify-between shrink-0">
-        <div>
-          {/* Brand Header */}
-          <div className="flex items-center space-x-2 mb-8">
-            <Logo className="h-8 w-auto" />
-          </div>
 
-          {/* User Profile Summary */}
-          <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 mb-6">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="p-2 bg-brand/10 text-brand rounded-full">
-                <User className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-gray-900 text-sm">{user.name}</h3>
-                <p className="text-xs text-gray-500">{user.current_role}</p>
-              </div>
-            </div>
+      {/* ── LEFT SIDEBAR – Vertical Navigation ── */}
+      <aside className="w-full md:w-64 bg-white border-r border-gray-200 flex flex-col shrink-0">
 
-            <div className="text-xs text-gray-600 space-y-1 border-t border-gray-200/50 pt-2">
-              <p>Target role: <span className="font-semibold text-brand">{user.target_role}</span></p>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {user.skills.slice(0, 5).map((sk, idx) => (
-                  <span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-medium border border-blue-100">
-                    {sk}
-                  </span>
-                ))}
-                {user.skills.length > 5 && <span className="text-[10px] text-gray-400 font-medium">+{user.skills.length - 5} more</span>}
-              </div>
-            </div>
-          </div>
-
-          {/* Quick diagnostics settings panel */}
-          <form onSubmit={handleSaveProfile} className="space-y-4 border-b border-gray-100 pb-6 mb-6">
-            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Fast Diagnostics Editor</h4>
-            
-            {profileSuccessMsg && (
-              <div className="p-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
-                {profileSuccessMsg}
-              </div>
-            )}
-
-            <div>
-              <label className="block text-[11px] font-medium text-gray-500">Edit Skills (comma separated)</label>
-              <textarea
-                value={editSkills}
-                onChange={(e) => setEditSkills(e.target.value)}
-                className="mt-1 block w-full p-2 text-xs border border-gray-300 rounded focus:ring-brand focus:border-brand bg-white"
-                rows="2"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-medium text-gray-500">Change Target Role</label>
-              <select
-                value={editTargetRole}
-                onChange={(e) => setEditTargetRole(e.target.value)}
-                className="mt-1 block w-full p-2 text-xs border border-gray-300 bg-white rounded focus:ring-brand focus:border-brand"
-              >
-                <option value="AI Engineer">AI Engineer</option>
-                <option value="Machine Learning Engineer">Machine Learning Engineer</option>
-                <option value="Cloud Architect">Cloud Architect</option>
-                <option value="Data Analyst">Data Analyst</option>
-                <option value="Full Stack Developer">Full Stack Developer</option>
-              </select>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isUpdatingProfile}
-              className="w-full flex justify-center py-1.5 px-3 border border-transparent rounded text-xs font-medium text-white bg-brand hover:bg-brand-light focus:outline-none transition-all disabled:opacity-50"
-            >
-              {isUpdatingProfile ? 'Recalculating...' : 'Update & Diagnostic'}
-            </button>
-          </form>
-
-          {/* Interactive CV Upload Simulation */}
-          <form onSubmit={handleCvUpload} className="space-y-4 pb-6">
-            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Upload CV (Mock Parser)</h4>
-            {cvSuccessMsg && (
-              <div className="p-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
-                {cvSuccessMsg}
-              </div>
-            )}
-            <div className="flex flex-col space-y-2">
-              <input
-                id="cv-file-input"
-                type="file"
-                accept=".pdf,.doc,.docx"
-                required
-                onChange={(e) => setCvFile(e.target.files[0])}
-                className="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-              />
-              <button
-                type="submit"
-                disabled={!cvFile || cvUploadLoading}
-                className="w-full flex items-center justify-center py-1.5 px-3 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50"
-              >
-                {cvUploadLoading ? (
-                  <>
-                    <RefreshCw className="animate-spin h-3 w-3 mr-1 text-gray-700" />
-                    <span>Parsing CV...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-3 w-3 mr-1 text-gray-700" />
-                    <span>Upload & Parse CV</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
+        {/* Logo */}
+        <div className="px-5 py-5 border-b border-gray-100">
+          <Logo className="h-8 w-auto" />
         </div>
 
-        {/* Logout Button */}
-        <button
-          onClick={onLogout}
-          className="w-full py-2 border border-gray-300 rounded text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          Logout Session
-        </button>
+        {/* Nav links */}
+        <nav className="flex-1 px-3 py-4 space-y-1">
+          <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Dashboard</p>
+
+          <button
+            onClick={() => setActiveTab('demand')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'demand'
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <TrendingUp className="h-4 w-4 shrink-0" />
+            <span>Market Forecasts</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('gap')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'gap'
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <FileSearch className="h-4 w-4 shrink-0" />
+            <span>Skill Gap Discovery</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('path')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'path'
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <Milestone className="h-4 w-4 shrink-0" />
+            <span>Career Path Planning</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('matching')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'matching'
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <CheckSquare className="h-4 w-4 shrink-0" />
+            <span>Skill Matching &amp; Jobs</span>
+          </button>
+
+          {/* Divider */}
+          <div className="pt-4 pb-1">
+            <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Account</p>
+          </div>
+
+          {/* Profile nav link */}
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'profile'
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <User className="h-4 w-4 shrink-0" />
+            <div className="text-left">
+              <p className="leading-tight">{user.name}</p>
+              <p className={`text-[10px] leading-tight ${activeTab === 'profile' ? 'text-white/70' : 'text-gray-400'}`}>
+                {user.current_role}
+              </p>
+            </div>
+          </button>
+        </nav>
+
+        {/* Logout at bottom */}
+        <div className="px-3 pb-5 border-t border-gray-100 pt-3">
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-colors"
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span>Logout Session</span>
+          </button>
+        </div>
       </aside>
 
-      {/* Main Panel */}
+      {/* ── MAIN PANEL ── */}
       <main className="flex-1 flex flex-col bg-gray-50">
-        {/* Dashboard Tabs Header */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0">
+        {/* Top header bar */}
+        <header className="bg-white border-b border-gray-200 px-6 py-4 shrink-0 flex items-center justify-between relative">
+          {/* Left – page title */}
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Job Seeker Dashboard</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Diagnose skills, review roadmaps, and match vacancies</p>
+            <h1 className="text-xl font-bold text-gray-900">
+              {activeTab === 'demand'   && 'Market Forecasts'}
+              {activeTab === 'gap'      && 'Skill Gap Discovery'}
+              {activeTab === 'path'     && 'Career Path Planning'}
+              {activeTab === 'matching' && 'Skill Matching & Jobs'}
+              {activeTab === 'profile'  && 'My Profile'}
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {activeTab === 'profile'
+                ? 'Manage your skills, target role, and upload your CV'
+                : 'Diagnose skills, review roadmaps, and match vacancies'}
+            </p>
           </div>
-          <div className="flex flex-wrap border-b sm:border-b-0 border-gray-200 mt-4 sm:mt-0 gap-1">
+
+          {/* Right – Notification bell */}
+          <div className="relative" ref={notifRef}>
             <button
-              onClick={() => setActiveTab('demand')}
-              className={`flex items-center space-x-1 px-3 py-2 text-xs font-semibold rounded-md transition-all ${
-                activeTab === 'demand' ? 'bg-brand text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
+              onClick={() => setShowNotifications(prev => !prev)}
+              className="relative p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus:outline-none"
+              aria-label="Notifications"
             >
-              <TrendingUp className="h-3.5 w-3.5" />
-              <span>1. Market Forecasts</span>
+              <Bell className="h-5 w-5" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
+                  {unreadCount}
+                </span>
+              )}
             </button>
-            <button
-              onClick={() => setActiveTab('gap')}
-              className={`flex items-center space-x-1 px-3 py-2 text-xs font-semibold rounded-md transition-all ${
-                activeTab === 'gap' ? 'bg-brand text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <FileSearch className="h-3.5 w-3.5" />
-              <span>2. Skill Gap Discovery</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('path')}
-              className={`flex items-center space-x-1 px-3 py-2 text-xs font-semibold rounded-md transition-all ${
-                activeTab === 'path' ? 'bg-brand text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <Milestone className="h-3.5 w-3.5" />
-              <span>3. Career Path Planning</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('matching')}
-              className={`flex items-center space-x-1 px-3 py-2 text-xs font-semibold rounded-md transition-all ${
-                activeTab === 'matching' ? 'bg-brand text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <CheckSquare className="h-3.5 w-3.5" />
-              <span>4. Skill Matching & Jobs</span>
-            </button>
+
+            {/* Floating notification panel */}
+            {showNotifications && (
+              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
+                {/* Panel header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-2">
+                    <Bell className="h-4 w-4 text-gray-700" />
+                    <span className="text-sm font-bold text-gray-900">Notifications</span>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-full">
+                        {unreadCount} new
+                      </span>
+                    )}
+                  </div>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={markAllRead}
+                      className="text-[11px] text-brand font-semibold hover:underline"
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+
+                {/* Notification list */}
+                <ul className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                  {notifications.length === 0 && (
+                    <li className="px-4 py-8 text-center text-sm text-gray-400">
+                      You're all caught up! 🎉
+                    </li>
+                  )}
+                  {notifications.map(n => (
+                    <li
+                      key={n.id}
+                      className={`flex items-start gap-3 px-4 py-3 group transition-colors ${
+                        n.read ? 'bg-white' : 'bg-blue-50/40'
+                      }`}
+                    >
+                      {/* Icon */}
+                      <div className={`mt-0.5 p-1.5 rounded-full shrink-0 ${notifIconColor[n.type]}`}>
+                        {notifIcon[n.type]}
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <p className={`text-xs font-semibold truncate ${n.read ? 'text-gray-700' : 'text-gray-900'}`}>
+                            {n.title}
+                            {!n.read && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />}
+                          </p>
+                          <span className="text-[10px] text-gray-400 shrink-0">{n.time}</span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed line-clamp-2">
+                          {n.body}
+                        </p>
+                      </div>
+
+                      {/* Dismiss */}
+                      <button
+                        onClick={() => dismissNotif(n.id)}
+                        className="opacity-0 group-hover:opacity-100 mt-0.5 text-gray-300 hover:text-gray-500 transition-opacity shrink-0"
+                        aria-label="Dismiss"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* Panel footer */}
+                {notifications.length > 0 && (
+                  <div className="px-4 py-2.5 border-t border-gray-100 text-center">
+                    <button
+                      onClick={() => setNotifications([])}
+                      className="text-[11px] text-gray-400 hover:text-gray-600 font-medium transition-colors"
+                    >
+                      Clear all notifications
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </header>
 
@@ -783,6 +869,113 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     No active job listings synced from platform feeds matching your criteria.
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: PROFILE / SETTINGS */}
+          {activeTab === 'profile' && (
+            <div className="max-w-2xl mx-auto space-y-6">
+              {/* Profile summary card */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <div className="flex items-center space-x-4 mb-4">
+                  <div className="p-3 bg-brand/10 text-brand rounded-full">
+                    <User className="h-7 w-7" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900">{user.name}</h2>
+                    <p className="text-sm text-gray-500">{user.current_role}</p>
+                  </div>
+                </div>
+                <div className="text-sm text-gray-700 border-t border-gray-100 pt-4 space-y-2">
+                  <p>Target role: <span className="font-semibold text-brand">{user.target_role}</span></p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {user.skills.map((sk, idx) => (
+                      <span key={idx} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium border border-blue-100">
+                        {sk}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Fast Diagnostics Editor */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <h3 className="text-sm font-bold text-gray-800 mb-4">Fast Diagnostics Editor</h3>
+                <form onSubmit={handleSaveProfile} className="space-y-4">
+                  {profileSuccessMsg && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
+                      {profileSuccessMsg}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Edit Skills <span className="text-gray-400">(comma separated)</span></label>
+                    <textarea
+                      value={editSkills}
+                      onChange={(e) => setEditSkills(e.target.value)}
+                      className="block w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-brand focus:border-brand bg-white"
+                      rows="3"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Change Target Role</label>
+                    <select
+                      value={editTargetRole}
+                      onChange={(e) => setEditTargetRole(e.target.value)}
+                      className="block w-full p-3 text-sm border border-gray-300 bg-white rounded-lg focus:ring-brand focus:border-brand"
+                    >
+                      <option value="AI Engineer">AI Engineer</option>
+                      <option value="Machine Learning Engineer">Machine Learning Engineer</option>
+                      <option value="Cloud Architect">Cloud Architect</option>
+                      <option value="Data Analyst">Data Analyst</option>
+                      <option value="Full Stack Developer">Full Stack Developer</option>
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isUpdatingProfile}
+                    className="w-full flex justify-center py-2.5 px-4 rounded-lg text-sm font-semibold text-white bg-brand hover:bg-brand-light transition-all disabled:opacity-50"
+                  >
+                    {isUpdatingProfile ? 'Recalculating...' : 'Update & Run Diagnostic'}
+                  </button>
+                </form>
+              </div>
+
+              {/* CV Upload */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <h3 className="text-sm font-bold text-gray-800 mb-4">Upload CV <span className="text-gray-400 font-normal">(Mock Parser)</span></h3>
+                <form onSubmit={handleCvUpload} className="space-y-4">
+                  {cvSuccessMsg && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
+                      {cvSuccessMsg}
+                    </div>
+                  )}
+                  <input
+                    id="cv-file-input"
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    required
+                    onChange={(e) => setCvFile(e.target.files[0])}
+                    className="block w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!cvFile || cvUploadLoading}
+                    className="w-full flex items-center justify-center py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50"
+                  >
+                    {cvUploadLoading ? (
+                      <>
+                        <RefreshCw className="animate-spin h-4 w-4 mr-2 text-gray-600" />
+                        <span>Parsing CV...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2 text-gray-600" />
+                        <span>Upload &amp; Parse CV</span>
+                      </>
+                    )}
+                  </button>
+                </form>
               </div>
             </div>
           )}
