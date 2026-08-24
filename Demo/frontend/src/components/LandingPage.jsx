@@ -84,7 +84,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
               }}
               className="w-full sm:w-auto px-8 py-4 text-base font-medium bg-transparent border border-gray-400 hover:bg-white/10 text-white rounded-lg transition-all"
             >
-              Enterprise Recruiter Portal
+              Enterprise Portal
             </button>
           </div>
         </div>
