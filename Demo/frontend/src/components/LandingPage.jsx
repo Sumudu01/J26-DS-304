@@ -260,9 +260,10 @@ function LandingPage({ onNavigate, user, onLogout }) {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center text-sm">
           <div className="flex items-center space-x-2">
             <Logo className="h-6 w-auto" light={true} />
-            <span className="font-semibold text-white">Emploeralk</span>
-            <span>© 2026. All rights reserved.</span>
+            <span>Contact Team: emploeralk@gmail.com</span>
           </div>
+          <span>© 2026. All rights reserved.</span>
+          
           <div className="flex space-x-6 mt-4 md:mt-0">
             <a href="#features" className="hover:text-white transition-colors">Features</a>
             <a href="#data-sources" className="hover:text-white transition-colors">Data Pipeline</a>
