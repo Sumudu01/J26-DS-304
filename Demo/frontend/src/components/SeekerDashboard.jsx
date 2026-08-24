@@ -289,17 +289,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
             </div>
           </button>
         </nav>
-
-        {/* Logout at bottom */}
-        <div className="px-3 pb-5 border-t border-gray-100 pt-3">
-          <button
-            onClick={onLogout}
-            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-colors"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span>Logout Session</span>
-          </button>
-        </div>
       </aside>
 
       {/* ── MAIN PANEL ── */}
@@ -322,24 +311,25 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
             </p>
           </div>
 
-          {/* Right – Notification bell */}
-          <div className="relative" ref={notifRef}>
-            <button
-              onClick={() => setShowNotifications(prev => !prev)}
-              className="relative p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus:outline-none"
-              aria-label="Notifications"
-            >
-              <Bell className="h-5 w-5" />
-              {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
-                  {unreadCount}
-                </span>
-              )}
-            </button>
+          {/* Right – Notification bell & Logout */}
+          <div className="flex items-center space-x-4">
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={() => setShowNotifications(prev => !prev)}
+                className="relative p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus:outline-none"
+                aria-label="Notifications"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
 
-            {/* Floating notification panel */}
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
+              {/* Floating notification panel */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
                 {/* Panel header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                   <div className="flex items-center space-x-2">
@@ -420,7 +410,16 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               </div>
             )}
           </div>
-        </header>
+
+          <button
+            onClick={onLogout}
+            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span>Logout Session</span>
+          </button>
+        </div>
+      </header>
 
         {/* Tab Contents */}
         <section className="flex-1 p-6 overflow-y-auto">
@@ -875,19 +874,19 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           {/* TAB 5: PROFILE / SETTINGS */}
           {activeTab === 'profile' && (
-            <div className="max-w-2xl mx-auto space-y-6">
-              {/* Profile summary card */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                <div className="flex items-center space-x-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-4xl mx-auto">
+              {/* Left column: Profile summary card */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                <div className="flex items-center space-x-3 mb-4">
                   <div className="p-3 bg-brand/10 text-brand rounded-full">
-                    <User className="h-7 w-7" />
+                    <User className="h-6 w-6" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-gray-900">{user.name}</h2>
+                    <h2 className="text-base font-bold text-gray-900">{user.name}</h2>
                     <p className="text-sm text-gray-500">{user.current_role}</p>
                   </div>
                 </div>
-                <div className="text-sm text-gray-700 border-t border-gray-100 pt-4 space-y-2">
+                <div className="text-sm text-gray-700 border-t border-gray-100 pt-3 space-y-2">
                   <p>Target role: <span className="font-semibold text-brand">{user.target_role}</span></p>
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {user.skills.map((sk, idx) => (
@@ -897,10 +896,47 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     ))}
                   </div>
                 </div>
+
+                {/* CV Upload (inside left card) */}
+                <div className="mt-5 pt-4 border-t border-gray-100">
+                  <h3 className="text-sm font-bold text-gray-800 mb-3">Upload CV <span className="text-gray-400 font-normal">(Mock Parser)</span></h3>
+                  <form onSubmit={handleCvUpload} className="space-y-3">
+                    {cvSuccessMsg && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
+                        {cvSuccessMsg}
+                      </div>
+                    )}
+                    <input
+                      id="cv-file-input"
+                      type="file"
+                      accept=".pdf,.doc,.docx"
+                      required
+                      onChange={(e) => setCvFile(e.target.files[0])}
+                      className="block w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!cvFile || cvUploadLoading}
+                      className="w-full flex items-center justify-center py-2 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50"
+                    >
+                      {cvUploadLoading ? (
+                        <>
+                          <RefreshCw className="animate-spin h-4 w-4 mr-2 text-gray-600" />
+                          <span>Parsing CV...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2 text-gray-600" />
+                          <span>Upload &amp; Parse CV</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
               </div>
 
-              {/* Fast Diagnostics Editor */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+              {/* Right column: Fast Diagnostics Editor */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
                 <h3 className="text-sm font-bold text-gray-800 mb-4">Fast Diagnostics Editor</h3>
                 <form onSubmit={handleSaveProfile} className="space-y-4">
                   {profileSuccessMsg && (
@@ -914,7 +950,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       value={editSkills}
                       onChange={(e) => setEditSkills(e.target.value)}
                       className="block w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-brand focus:border-brand bg-white"
-                      rows="3"
+                      rows="4"
                     />
                   </div>
                   <div>
@@ -937,43 +973,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     className="w-full flex justify-center py-2.5 px-4 rounded-lg text-sm font-semibold text-white bg-brand hover:bg-brand-light transition-all disabled:opacity-50"
                   >
                     {isUpdatingProfile ? 'Recalculating...' : 'Update & Run Diagnostic'}
-                  </button>
-                </form>
-              </div>
-
-              {/* CV Upload */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                <h3 className="text-sm font-bold text-gray-800 mb-4">Upload CV <span className="text-gray-400 font-normal">(Mock Parser)</span></h3>
-                <form onSubmit={handleCvUpload} className="space-y-4">
-                  {cvSuccessMsg && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
-                      {cvSuccessMsg}
-                    </div>
-                  )}
-                  <input
-                    id="cv-file-input"
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    required
-                    onChange={(e) => setCvFile(e.target.files[0])}
-                    className="block w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!cvFile || cvUploadLoading}
-                    className="w-full flex items-center justify-center py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50"
-                  >
-                    {cvUploadLoading ? (
-                      <>
-                        <RefreshCw className="animate-spin h-4 w-4 mr-2 text-gray-600" />
-                        <span>Parsing CV...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="h-4 w-4 mr-2 text-gray-600" />
-                        <span>Upload &amp; Parse CV</span>
-                      </>
-                    )}
                   </button>
                 </form>
               </div>
