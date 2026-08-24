@@ -244,13 +244,13 @@ function LandingPage({ onNavigate, user, onLogout }) {
             onClick={() => onNavigate('signup')} 
             className="px-6 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-light transition-all shadow-md"
           >
-            Create Job Seeker Account
+            Create Account
           </button>
           <button 
             onClick={() => onNavigate('login')} 
             className="px-6 py-3 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-all text-gray-700"
           >
-            Login to Admin Panel
+            Login to Panel
           </button>
         </div>
       </section>
@@ -266,7 +266,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
           <div className="flex space-x-6 mt-4 md:mt-0">
             <a href="#features" className="hover:text-white transition-colors">Features</a>
             <a href="#data-sources" className="hover:text-white transition-colors">Data Pipeline</a>
-            <span>Prototype Version 1.0</span>
+            <span>Prototype Version 1.5</span>
           </div>
         </div>
       </footer>
