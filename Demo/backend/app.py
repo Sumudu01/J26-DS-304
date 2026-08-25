@@ -287,13 +287,104 @@ def skill_gap():
     # Calculate match percentage
     match_percentage = int((len(matching_skills) / len(required_skills)) * 100) if required_skills else 100
             
+    # Generate Knowledge Graph Data
+    nodes = [
+        {"id": "Candidate", "name": "Candidate Profile", "group": "candidate"},
+        {"id": "Target Role", "name": f"Target: {target_role}", "group": "target"}
+    ]
+    links = []
+
+    # Map candidate skills
+    for s in user_skills:
+        nodes.append({"id": f"cv_{s}", "name": s, "group": "user_skill"})
+        links.append({"source": "Candidate", "target": f"cv_{s}"})
+
+    # Map target required skills
+    for s in required_skills:
+        node_id = f"req_{s}"
+        is_missing = s in missing_skills
+        group = "missing_skill" if is_missing else "matched_skill"
+        nodes.append({"id": node_id, "name": s, "group": group})
+        links.append({"source": "Target Role", "target": node_id})
+        
+        # Link user skills to required skills
+        for us in user_skills:
+            # Direct match
+            if us.lower() == s.lower():
+                links.append({"source": f"cv_{us}", "target": node_id})
+            # Similar match (e.g. ML -> Machine Learning)
+            elif (us.lower() in s.lower() or s.lower() in us.lower()) and len(us) > 1:
+                links.append({"source": f"cv_{us}", "target": node_id})
+                
+    # Basic aliases mapped
+    aliases = {
+        "ml": "Machine Learning", "ai": "Generative AI", "nlp": "Natural Language Processing",
+        "dl": "Deep Learning", "aws": "Cloud Computing", "gcp": "Cloud Computing"
+    }
+    for us in user_skills:
+        if us.lower() in aliases:
+            std_skill = aliases[us.lower()]
+            # If the standardized skill is a required skill
+            for rs in required_skills:
+                if rs.lower() == std_skill.lower() or rs.lower() in std_skill.lower():
+                    links.append({"source": f"cv_{us}", "target": f"req_{rs}"})
+                    break
+
+    graph_data = {
+        "nodes": nodes,
+        "links": links
+    }
+
+    # Skill Roadmap based on missing skills (Learning order from basic to advanced)
+    skill_levels = {
+        "git": 1, "communication": 1, "html": 1, "css": 1, "javascript": 1, "bash": 1,
+        "python": 2, "sql": 2, "cloud computing": 2, "docker": 2, "data analytics": 2,
+        "pandas": 3, "api development": 3, "aws": 3, "pytorch": 3,
+        "machine learning": 4, "deep learning": 4,
+        "nlp": 5, "generative ai": 5, "rag": 5, "prompt engineering": 5
+    }
+    
+    skill_roadmap = []
+    
+    # Sort missing skills by level
+    sorted_missing = sorted(missing_skills, key=lambda s: skill_levels.get(s.lower(), 3))
+    
+    if sorted_missing:
+        current_level = 0
+        current_step = None
+        step_counter = 1
+        
+        for skill in sorted_missing:
+            level = skill_levels.get(skill.lower(), 3)
+            
+            if not current_step or level > current_level:
+                if current_step:
+                    skill_roadmap.append(current_step)
+                
+                title = "Foundational Concepts" if level <= 2 else "Core Technical Skills" if level == 3 else "Advanced Specialization"
+                
+                current_step = {
+                    "step": step_counter,
+                    "title": f"Phase {step_counter}: {title}",
+                    "skills": [skill]
+                }
+                current_level = level
+                step_counter += 1
+            else:
+                current_step["skills"].append(skill)
+                
+        if current_step:
+            skill_roadmap.append(current_step)
+
     return jsonify({
         "target_role": target_role,
         "required_skills": required_skills,
         "matching_skills": matching_skills,
         "missing_skills": missing_skills,
         "match_percentage": match_percentage,
-        "recommended_courses": recommended_courses
+        "recommended_courses": recommended_courses,
+        "graph_data": graph_data,
+        "skill_roadmap": skill_roadmap
     }), 200
 
 # Module 3: Career Path Planner
@@ -409,6 +500,7 @@ def career_path():
 def matching_jobs():
     data = request.json or {}
     user_skills = data.get("skills", [])
+    query = data.get("query", "").strip().lower()
     
     # Make sure we have lowercase skills for case-insensitive matching
     user_skills_set = {s.lower() for s in user_skills}
@@ -416,6 +508,11 @@ def matching_jobs():
     matched_jobs = []
     
     for job in JOBS:
+        if query:
+            job_text = f"{job['title']} {job['company']} {job['description']} {' '.join(job['required_skills'])}".lower()
+            if query not in job_text:
+                continue
+
         req_skills = job["required_skills"]
         if not req_skills:
             score = 100
@@ -426,12 +523,13 @@ def matching_jobs():
             missing = [s for s in req_skills if s.lower() not in user_skills_set]
             score = int((len(matching) / len(req_skills)) * 100)
             
-        job_copy = job.copy()
-        job_copy["match_score"] = score
-        job_copy["matching_skills"] = matching
-        job_copy["missing_skills"] = missing
-        
-        matched_jobs.append(job_copy)
+        if query or score > 0:
+            job_copy = job.copy()
+            job_copy["match_score"] = score
+            job_copy["matching_skills"] = matching
+            job_copy["missing_skills"] = missing
+            
+            matched_jobs.append(job_copy)
         
     # Sort by compatibility score descending
     matched_jobs.sort(key=lambda x: x["match_score"], reverse=True)

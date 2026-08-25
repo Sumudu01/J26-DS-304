@@ -7,6 +7,7 @@ import {
   MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
   LogOut, Bell, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle
 } from 'lucide-react'
+import ForceGraph2D from 'react-force-graph-2d'
 
 function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [activeTab, setActiveTab] = useState('demand') // 'demand', 'gap', 'path', 'matching', 'profile'
@@ -79,6 +80,24 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   // UI states
   const [loading, setLoading] = useState(false)
   const [appliedJobIds, setAppliedJobIds] = useState(new Set())
+  const [jobSearchQuery, setJobSearchQuery] = useState('')
+  const [isSearchingJobs, setIsSearchingJobs] = useState(false)
+  const [gapSearchQuery, setGapSearchQuery] = useState('')
+  const [isSearchingGap, setIsSearchingGap] = useState(false)
+  const graphContainerRef = useRef(null)
+  const [graphWidth, setGraphWidth] = useState(800)
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (graphContainerRef.current) {
+        setGraphWidth(graphContainerRef.current.clientWidth)
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    // Initial check
+    setTimeout(handleResize, 100)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [activeTab, gapData])
 
   // Load initial data
   useEffect(() => {
@@ -98,17 +117,20 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     }
   }
 
-  const fetchGapAnalysis = async () => {
+  const fetchGapAnalysis = async (targetRole = user.target_role) => {
+    setIsSearchingGap(true)
     try {
       const res = await fetch(`${API_URL}/skill-gap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skills: user.skills, target_role: user.target_role })
+        body: JSON.stringify({ skills: user.skills, target_role: targetRole })
       })
       const data = await res.json()
       setGapData(data)
     } catch (e) {
       console.error("Error loading gap analysis", e)
+    } finally {
+      setIsSearchingGap(false)
     }
   }
 
@@ -126,17 +148,20 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     }
   }
 
-  const fetchMatchingJobs = async () => {
+  const fetchMatchingJobs = async (query = '') => {
+    setIsSearchingJobs(true)
     try {
       const res = await fetch(`${API_URL}/matching-jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skills: user.skills })
+        body: JSON.stringify({ skills: user.skills, query })
       })
       const data = await res.json()
       setMatchedJobs(data)
     } catch (e) {
       console.error("Error loading matched jobs", e)
+    } finally {
+      setIsSearchingJobs(false)
     }
   }
 
@@ -889,6 +914,49 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* TAB 2: SKILL GAP DISCOVERY */}
           {activeTab === 'gap' && (
             <div className="space-y-6">
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <h2 className="text-base font-bold text-gray-900">Skill Gap Discovery & Target Alignment</h2>
+                <p className="text-xs text-gray-500 mt-1 mb-5">
+                  Search for a specific job title or role to dynamically analyze your current skills against its requirements.
+                </p>
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); fetchGapAnalysis(gapSearchQuery || user.target_role); }}
+                  className="flex items-center gap-3"
+                >
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={gapSearchQuery}
+                      onChange={(e) => setGapSearchQuery(e.target.value)}
+                      placeholder={`Try searching for roles like "Data Scientist", "Backend Developer"... (Current Target: ${user.target_role})`}
+                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand/40 outline-none transition-all placeholder:text-gray-400"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSearchingGap}
+                    className="px-5 py-2.5 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-50 flex items-center space-x-1.5"
+                  >
+                    {isSearchingGap ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Search className="h-4 w-4" />
+                    )}
+                    <span>{isSearchingGap ? 'Analyzing...' : 'Analyze Role'}</span>
+                  </button>
+                  {gapSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => { setGapSearchQuery(''); fetchGapAnalysis(user.target_role); }}
+                      className="px-3 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </form>
+              </div>
+
               {gapData ? (
                 <>
                   {/* Progress Gauge */}
@@ -942,54 +1010,89 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     </div>
                   </div>
 
-                  {/* Course Recommendations */}
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                      <GraduationCap className="h-4 w-4 text-brand" />
-                      <span>Recommended Curated Courses from Coursera</span>
-                    </h3>
-                    <p className="text-xs text-gray-500 mb-4">Courses matched dynamically to address your <strong className="text-red-600">missing skills</strong> identified above.</p>
+                  {/* Skill Knowledge Graph */}
+                  {gapData.graph_data && (
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+                      <h3 className="text-sm font-bold text-gray-900 mb-2 flex items-center space-x-2">
+                        <span>Skill Relationship Knowledge Graph</span>
+                      </h3>
+                      <p className="text-xs text-gray-500 mb-4">Visual mapping of your CV skills and aliases compared to the target role requirements.</p>
+                      
+                      <div ref={graphContainerRef} className="w-full h-[400px] rounded-lg border border-gray-100 bg-gray-50 overflow-hidden relative flex items-center justify-center">
+                        <ForceGraph2D
+                          width={graphWidth}
+                          height={400}
+                          graphData={gapData.graph_data}
+                          nodeAutoColorBy="group"
+                          nodeLabel="name"
+                          nodeCanvasObject={(node, ctx, globalScale) => {
+                            const label = node.name;
+                            const fontSize = 12/globalScale;
+                            ctx.font = `${fontSize}px Sans-Serif`;
+                            const textWidth = ctx.measureText(label).width;
+                            const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.2);
 
-                    <div className="space-y-4">
-                      {gapData.recommended_courses.map((course, idx) => (
-                        <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors gap-4">
-                          <div className="flex items-start space-x-3">
-                            <div className="p-2 bg-blue-50 text-blue-600 rounded mt-1 shrink-0">
-                              <BookOpen className="h-4 w-4" />
-                            </div>
-                            <div>
-                              <h4 className="text-xs font-bold text-gray-900">{course.title}</h4>
-                              <p className="text-[10px] text-gray-500 mt-0.5">{course.provider} • Duration: {course.duration}</p>
-                              <div className="flex flex-wrap gap-1 mt-1.5">
-                                {course.skills_taught.map((st, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] font-medium border border-gray-200">
-                                    Teaches: {st}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-4 self-end sm:self-center shrink-0">
-                            <span className="text-xs font-bold text-yellow-600">★ {course.rating}</span>
-                            <a
-                              href={course.link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center space-x-1 px-3 py-1.5 bg-brand text-white rounded text-xs font-semibold hover:bg-brand-light transition-all"
-                            >
-                              <span>Enroll Course</span>
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          </div>
-                        </div>
-                      ))}
-                      {gapData.recommended_courses.length === 0 && (
-                        <div className="p-6 text-center text-xs text-gray-500 border border-dashed rounded-lg bg-gray-50">
-                          No specific course sync recommendations available for your current skills gaps.
-                        </div>
-                      )}
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                            ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, ...bckgDimensions);
+
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            
+                            if (node.group === 'candidate' || node.group === 'target') {
+                                ctx.fillStyle = '#002855'; // brand
+                            } else if (node.group === 'matched_skill') {
+                                ctx.fillStyle = '#059669'; // emerald
+                            } else if (node.group === 'missing_skill') {
+                                ctx.fillStyle = '#dc2626'; // red
+                            } else {
+                                ctx.fillStyle = '#2563eb'; // blue
+                            }
+                            
+                            ctx.fillText(label, node.x, node.y);
+                            node.__bckgDimensions = bckgDimensions;
+                          }}
+                          nodePointerAreaPaint={(node, color, ctx) => {
+                            ctx.fillStyle = color;
+                            const bckgDimensions = node.__bckgDimensions;
+                            bckgDimensions && ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, ...bckgDimensions);
+                          }}
+                          linkColor={() => '#cbd5e1'}
+                          linkDirectionalArrowLength={3.5}
+                          linkDirectionalArrowRelPos={1}
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* Recommended Skill Roadmap */}
+                  {gapData.skill_roadmap && gapData.skill_roadmap.length > 0 && (
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col mt-6">
+                      <h3 className="text-sm font-bold text-gray-900 mb-2 flex items-center space-x-2">
+                        <Milestone className="h-4 w-4 text-brand" />
+                        <span>Recommended Skill Acquisition Roadmap</span>
+                      </h3>
+                      <p className="text-xs text-gray-500 mb-5">Suggested step-by-step learning path to acquire your missing skills effectively, starting from base foundations.</p>
+                      
+                      <div className="space-y-6 relative border-l-2 border-brand/20 ml-2 pl-6 pt-2 pb-2">
+                        {gapData.skill_roadmap.map((phase, idx) => (
+                          <div key={idx} className="relative">
+                            <div className="absolute -left-[33px] top-0.5 rounded-full bg-white border-2 border-brand h-4 w-4 shadow-[0_0_0_2px_white] flex items-center justify-center">
+                                <div className="bg-brand h-1.5 w-1.5 rounded-full"></div>
+                            </div>
+                            <h4 className="text-xs font-bold text-gray-900">{phase.title}</h4>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {phase.skills.map((s, i) => (
+                                <span key={i} className="px-2.5 py-1 bg-brand/5 text-brand border border-brand/10 text-xs font-semibold rounded-md shadow-sm transition-all hover:bg-brand hover:text-white cursor-default">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                 </>
               ) : (
                 <div className="h-64 flex items-center justify-center text-sm text-gray-500">Retrieving diagnostics...</div>
@@ -1069,6 +1172,57 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               ) : (
                 <div className="h-64 flex items-center justify-center text-sm text-gray-500">Synthesizing path timeline...</div>
               )}
+
+              {/* Course Recommendations */}
+              {gapData && (
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center space-x-2">
+                    <GraduationCap className="h-4 w-4 text-brand" />
+                    <span>Recommended Curated Courses from Coursera</span>
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-4">Courses matched dynamically to address your <strong className="text-red-600">missing skills</strong>.</p>
+
+                  <div className="space-y-4">
+                    {gapData.recommended_courses.map((course, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors gap-4">
+                        <div className="flex items-start space-x-3">
+                          <div className="p-2 bg-blue-50 text-blue-600 rounded mt-1 shrink-0">
+                            <BookOpen className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-gray-900">{course.title}</h4>
+                            <p className="text-[10px] text-gray-500 mt-0.5">{course.provider} • Duration: {course.duration}</p>
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {course.skills_taught.map((st, i) => (
+                                <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] font-medium border border-gray-200">
+                                  Teaches: {st}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-4 self-end sm:self-center shrink-0">
+                          <span className="text-xs font-bold text-yellow-600">★ {course.rating}</span>
+                          <a
+                            href={course.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-brand text-white rounded text-xs font-semibold hover:bg-brand-light transition-all"
+                          >
+                            <span>Enroll Course</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                    {gapData.recommended_courses.length === 0 && (
+                      <div className="p-6 text-center text-xs text-gray-500 border border-dashed rounded-lg bg-gray-50">
+                        No specific course sync recommendations available for your current skills gaps.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1077,9 +1231,46 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-4">
                 <h2 className="text-base font-bold text-gray-900">Skill Matching & Vacancy Alignment</h2>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-gray-500 mt-1 mb-5">
                   Jobs scraped from LinkedIn, TopJobs.lk, and Indeed, matched automatically using your calculated skill matching coefficient.
                 </p>
+
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); fetchMatchingJobs(jobSearchQuery); }}
+                  className="flex items-center gap-3"
+                >
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={jobSearchQuery}
+                      onChange={(e) => setJobSearchQuery(e.target.value)}
+                      placeholder='Search jobs by title, company, or skills...'
+                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand/40 outline-none transition-all placeholder:text-gray-400"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSearchingJobs}
+                    className="px-5 py-2.5 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-50 flex items-center space-x-1.5"
+                  >
+                    {isSearchingJobs ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Search className="h-4 w-4" />
+                    )}
+                    <span>{isSearchingJobs ? 'Searching...' : 'Search'}</span>
+                  </button>
+                  {jobSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => { setJobSearchQuery(''); fetchMatchingJobs(''); }}
+                      className="px-3 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </form>
               </div>
 
               <div className="space-y-4">
@@ -1101,7 +1292,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           
                           <div className="flex items-center space-x-2">
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-600 border border-gray-200 rounded-full text-[10px] font-semibold">
-                              Scraped: {job.platform}
+                              {job.platform}
                             </span>
                             <span className="text-[10px] text-gray-400 font-medium">{job.posted_date}</span>
                           </div>
