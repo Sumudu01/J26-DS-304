@@ -84,6 +84,16 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [isSearchingJobs, setIsSearchingJobs] = useState(false)
   const [gapSearchQuery, setGapSearchQuery] = useState('')
   const [isSearchingGap, setIsSearchingGap] = useState(false)
+
+  // Course Search states
+  const [courseSearchQuery, setCourseSearchQuery] = useState('')
+  const [courseSearchScope, setCourseSearchScope] = useState('recommended') // 'recommended' or 'all'
+  const [allCourses, setAllCourses] = useState([])
+  const [isSearchingCourses, setIsSearchingCourses] = useState(false)
+
+  // Salary Insights state
+  const [salaryData, setSalaryData] = useState(null)
+
   const graphContainerRef = useRef(null)
   const [graphWidth, setGraphWidth] = useState(800)
 
@@ -105,6 +115,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     fetchGapAnalysis()
     fetchCareerPath()
     fetchMatchingJobs()
+    fetchSalaryInsights()
   }, [user]) // Re-run whenever user profile changes (skills, target_role)
 
   const fetchDemandForecast = async () => {
@@ -127,6 +138,8 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       })
       const data = await res.json()
       setGapData(data)
+      // Re-fetch salary insights with accurate missing skills
+      fetchSalaryInsights(data.missing_skills || [])
     } catch (e) {
       console.error("Error loading gap analysis", e)
     } finally {
@@ -148,6 +161,24 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     }
   }
 
+  const fetchSalaryInsights = async (missingSkills = []) => {
+    try {
+      const res = await fetch(`${API_URL}/salary-insights`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_role: user.current_role,
+          target_role: user.target_role,
+          missing_skills: missingSkills
+        })
+      })
+      const data = await res.json()
+      setSalaryData(data)
+    } catch (e) {
+      console.error("Error loading salary insights", e)
+    }
+  }
+
   const fetchMatchingJobs = async (query = '') => {
     setIsSearchingJobs(true)
     try {
@@ -164,6 +195,29 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       setIsSearchingJobs(false)
     }
   }
+
+  const fetchCatalogCourses = async (query = '') => {
+    setIsSearchingCourses(true)
+    try {
+      const res = await fetch(`${API_URL}/courses?query=${encodeURIComponent(query)}`)
+      const data = await res.json()
+      setAllCourses(data)
+    } catch (e) {
+      console.error("Error loading catalog courses", e)
+    } finally {
+      setIsSearchingCourses(false)
+    }
+  }
+
+  // Debounced effect for fetching catalog courses
+  useEffect(() => {
+    if (courseSearchScope === 'all') {
+      const delayDebounceFn = setTimeout(() => {
+        fetchCatalogCourses(courseSearchQuery)
+      }, 300)
+      return () => clearTimeout(delayDebounceFn)
+    }
+  }, [courseSearchQuery, courseSearchScope])
 
   // Search for skill/job demand
   const searchSkillDemand = async (e) => {
@@ -1103,123 +1157,374 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* TAB 3: CAREER PATH PLANNING */}
           {activeTab === 'path' && (
             <div className="space-y-6">
-              {careerData ? (
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <div className="mb-6 border-b border-gray-100 pb-4">
-                    <h2 className="text-base font-bold text-gray-900">
-                      AI Career Path Planner: Transition to <span className="text-brand">{careerData.target_role}</span>
-                    </h2>
-                    <p className="text-xs text-gray-500 mt-1">Est. Duration: <strong>{careerData.estimated_duration}</strong> starting from your current status: <strong>{careerData.current_role}</strong>.</p>
-                  </div>
+              {/* ─── TWO-COLUMN: Career Path Planner + Salary Insight side by side ─── */}
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
 
-                  {/* Vertical Timeline Roadmap */}
-                  <div className="relative border-l-2 border-gray-200 ml-4 pl-8 space-y-8">
-                    {careerData.roadmap.map((step, idx) => (
-                      <div key={idx} className="relative">
-                        {/* Circle dot representing step status */}
-                        <div className={`absolute -left-[41px] top-0.5 rounded-full border-4 border-white h-7 w-7 flex items-center justify-center text-xs font-bold text-white shadow-sm ${
-                          step.status === 'completed' 
-                            ? 'bg-emerald-500' 
-                            : step.status === 'in-progress' 
-                            ? 'bg-indigo-600' 
-                            : 'bg-gray-300'
-                        }`}>
-                          {step.step}
-                        </div>
+                {/* LEFT: AI Career Path Timeline (narrower) */}
+                <div className="lg:col-span-2">
+                  {careerData ? (
+                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-full">
+                      <div className="mb-5 border-b border-gray-100 pb-4">
+                        <h2 className="text-sm font-bold text-gray-900">
+                          AI Career Path Planner: Transition to <span className="text-brand">{careerData.target_role}</span>
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-1">Est. Duration: <strong>{careerData.estimated_duration}</strong> from <strong>{careerData.current_role}</strong>.</p>
+                      </div>
 
-                        <div>
-                          <div className="flex items-center space-x-3">
-                            <h3 className="text-xs font-bold text-gray-900">{step.title}</h3>
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${
+                      {/* Vertical Timeline Roadmap */}
+                      <div className="relative border-l-2 border-gray-200 ml-3 pl-6 space-y-6">
+                        {careerData.roadmap.map((step, idx) => (
+                          <div key={idx} className="relative">
+                            {/* Circle dot */}
+                            <div className={`absolute -left-[37px] top-0.5 rounded-full border-4 border-white h-6 w-6 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ${
                               step.status === 'completed'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                ? 'bg-emerald-500'
                                 : step.status === 'in-progress'
-                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                : 'bg-gray-100 text-gray-400 border-gray-200'
+                                ? 'bg-indigo-600'
+                                : 'bg-gray-300'
                             }`}>
-                              {step.status}
-                            </span>
-                          </div>
-                          
-                          <p className="text-xs text-gray-600 mt-1 max-w-2xl leading-relaxed">{step.description}</p>
-                          <div className="text-[10px] text-gray-500 mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-                            <span>⏱️ Estimated: <strong>{step.duration}</strong></span>
-                            <div className="flex items-center space-x-1">
-                              <span>Focus:</span>
-                              {step.skills_to_acquire.map((sk, i) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-[9px] font-semibold border border-gray-200/50">
-                                  {sk}
+                              {step.step}
+                            </div>
+
+                            <div>
+                              <div className="flex items-center flex-wrap gap-2">
+                                <h3 className="text-[11px] font-bold text-gray-900 leading-tight">{step.title}</h3>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase ${
+                                  step.status === 'completed'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : step.status === 'in-progress'
+                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                    : 'bg-gray-100 text-gray-400 border-gray-200'
+                                }`}>
+                                  {step.status}
                                 </span>
-                              ))}
+                              </div>
+                              <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">{step.description}</p>
+                              <div className="text-[9px] text-gray-400 mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span>⏱️ <strong>{step.duration}</strong></span>
+                                <div className="flex items-center flex-wrap gap-1">
+                                  {step.skills_to_acquire.map((sk, i) => (
+                                    <span key={i} className="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-[8px] font-semibold border border-gray-200/50">
+                                      {sk}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
                             </div>
                           </div>
+                        ))}
+
+                        {/* Final Step */}
+                        <div className="relative">
+                          <div className="absolute -left-[37px] top-0.5 rounded-full border-4 border-white h-6 w-6 flex items-center justify-center text-[10px] font-bold text-white bg-brand shadow-sm">
+                            ★
+                          </div>
+                          <div>
+                            <h3 className="text-[11px] font-bold text-brand">Career Target Achieved</h3>
+                            <p className="text-[10px] text-gray-500 mt-0.5">Ready for placement as <span className="font-semibold">{careerData.target_role}</span>!</p>
+                          </div>
                         </div>
                       </div>
-                    ))}
+                    </div>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-sm text-gray-500 bg-white rounded-xl border border-gray-200">Synthesizing path timeline...</div>
+                  )}
+                </div>
 
-                    {/* Final Step */}
-                    <div className="relative">
-                      <div className="absolute -left-[41px] top-0.5 rounded-full border-4 border-white h-7 w-7 flex items-center justify-center text-xs font-bold text-white bg-brand shadow-sm">
-                        ★
+                {/* RIGHT: Salary Insight & Forecast (wider) */}
+                <div className="lg:col-span-3">
+                  {salaryData ? (
+                    <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      {/* Header banner */}
+                      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 px-6 py-4 flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center space-x-2 mb-1">
+                            <DollarSign className="h-4 w-4 text-indigo-300" />
+                            <h3 className="text-sm font-bold text-white">Salary Insight &amp; Forecast</h3>
+                          </div>
+                          <p className="text-xs text-indigo-300">Unlock your earning potential by gaining the missing skills for <span className="text-white font-semibold">{salaryData.target_role}</span></p>
+                        </div>
+                        <div className="text-right shrink-0 ml-4">
+                          <div className="text-xs text-indigo-400 mb-0.5">Potential Uplift</div>
+                          <div className="text-2xl font-black text-emerald-400 tracking-tight">
+                            +{salaryData.uplift_pct}%
+                          </div>
+                          <div className="text-[10px] text-indigo-400">salary increase</div>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="text-xs font-bold text-brand">Career Target Achieved</h3>
-                        <p className="text-xs text-gray-600 mt-1">Ready for full-time placement matching for a <span className="font-semibold">{careerData.target_role}</span> role!</p>
+
+                      <div className="bg-white p-5">
+                        {/* Current vs Target salary comparison */}
+                        <div className="grid grid-cols-2 gap-3 mb-5">
+                          <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                            <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-1">Current Role</p>
+                            <p className="text-[11px] font-bold text-gray-700 mb-1.5">{salaryData.current_role}</p>
+                            <p className="text-base font-black text-gray-900">LKR {(salaryData.current_salary.median / 1000).toFixed(0)}K</p>
+                            <p className="text-[10px] text-gray-500 mt-0.5">{(salaryData.current_salary.min / 1000).toFixed(0)}K – {(salaryData.current_salary.max / 1000).toFixed(0)}K / month</p>
+                          </div>
+                          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-3 border border-indigo-100 relative overflow-hidden">
+                            <div className="absolute top-2 right-2">
+                              <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold rounded-full border border-emerald-200">TARGET</span>
+                            </div>
+                            <p className="text-[10px] text-indigo-500 font-semibold uppercase tracking-wide mb-1">Target Role</p>
+                            <p className="text-[11px] font-bold text-indigo-700 mb-1.5">{salaryData.target_role}</p>
+                            <p className="text-base font-black text-indigo-900">LKR {(salaryData.target_salary.median / 1000).toFixed(0)}K</p>
+                            <p className="text-[10px] text-indigo-500 mt-0.5">{(salaryData.target_salary.min / 1000).toFixed(0)}K – {(salaryData.target_salary.max / 1000).toFixed(0)}K / month</p>
+                          </div>
+                        </div>
+
+                        {/* Salary uplift bar */}
+                        <div className="mb-5">
+                          <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                            <span>Current median</span>
+                            <span>Target median</span>
+                          </div>
+                          <div className="relative h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="absolute left-0 top-0 h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"
+                              style={{ width: `${Math.min(100, Math.round((salaryData.current_salary.median / salaryData.target_salary.max) * 100))}%` }}
+                            />
+                            <div
+                              className="absolute left-0 top-0 h-full bg-gradient-to-r from-emerald-400 to-teal-400 rounded-full opacity-40"
+                              style={{ width: `${Math.min(100, Math.round((salaryData.target_salary.median / salaryData.target_salary.max) * 100))}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-emerald-600 font-bold mt-1 text-right">
+                            + LKR {(salaryData.salary_uplift / 1000).toFixed(0)}K more per month
+                          </p>
+                        </div>
+
+                        {/* Per-skill salary boost bars */}
+                        {salaryData.skill_impacts && salaryData.skill_impacts.length > 0 && (
+                          <div className="mb-5">
+                            <p className="text-[10px] font-bold text-gray-700 uppercase tracking-wide mb-2.5 flex items-center space-x-1">
+                              <TrendingUp className="h-3 w-3 text-brand" />
+                              <span>Salary Boost per Missing Skill</span>
+                            </p>
+                            <div className="space-y-2">
+                              {salaryData.skill_impacts.map((item, idx) => {
+                                const maxBoost = salaryData.skill_impacts[0].avg_boost_lkr;
+                                const pct = Math.round((item.avg_boost_lkr / maxBoost) * 100);
+                                const categoryColor = {
+                                  'cutting-edge': 'from-purple-500 to-indigo-500',
+                                  'advanced':     'from-indigo-500 to-blue-500',
+                                  'cloud':        'from-sky-500 to-cyan-500',
+                                  'devops':       'from-teal-500 to-emerald-500',
+                                  'foundational': 'from-gray-400 to-gray-500',
+                                }[item.category] || 'from-brand to-indigo-500';
+                                return (
+                                  <div key={idx}>
+                                    <div className="flex justify-between items-center mb-0.5">
+                                      <div className="flex items-center space-x-1.5">
+                                        <span className="text-xs font-semibold text-gray-800">{item.skill}</span>
+                                        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold border ${
+                                          item.category === 'cutting-edge' ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                          : item.category === 'advanced'   ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                          : item.category === 'cloud'      ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                          : item.category === 'devops'     ? 'bg-teal-50 text-teal-700 border-teal-200'
+                                          : 'bg-gray-100 text-gray-600 border-gray-200'
+                                        }`}>{item.category}</span>
+                                      </div>
+                                      <span className="text-[10px] font-bold text-emerald-600">+LKR {(item.avg_boost_lkr / 1000).toFixed(0)}K/mo</span>
+                                    </div>
+                                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full bg-gradient-to-r ${categoryColor} rounded-full transition-all duration-500`}
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 5-Year salary growth forecast */}
+                        {salaryData.yearly_forecast && (
+                          <div>
+                            <p className="text-[10px] font-bold text-gray-700 uppercase tracking-wide mb-2.5 flex items-center space-x-1">
+                              <BarChart3 className="h-3 w-3 text-brand" />
+                              <span>5-Year AI Salary Forecast (Sri Lanka Market)</span>
+                            </p>
+                            <div className="grid grid-cols-5 gap-2">
+                              {salaryData.yearly_forecast.map((yr, idx) => {
+                                const maxVal = Math.max(...salaryData.yearly_forecast.map(y => y.senior_ai_median));
+                                const isCurrentYear = yr.year === 2026;
+                                return (
+                                  <div key={idx} className="flex flex-col items-center">
+                                    <div className="w-full flex flex-col items-center space-y-0.5">
+                                      <div className="w-full bg-gray-100 rounded-sm overflow-hidden" style={{ height: '48px' }}>
+                                        <div
+                                          className="w-full bg-gradient-to-t from-purple-600 to-purple-400 rounded-sm"
+                                          style={{ height: `${(yr.senior_ai_median / maxVal) * 100}%`, marginTop: `${100 - (yr.senior_ai_median / maxVal) * 100}%` }}
+                                        />
+                                      </div>
+                                      <div className="w-full bg-gray-100 rounded-sm overflow-hidden" style={{ height: '32px' }}>
+                                        <div
+                                          className={`w-full rounded-sm ${isCurrentYear ? 'bg-gradient-to-t from-brand to-indigo-400' : 'bg-gradient-to-t from-indigo-500 to-blue-400'}`}
+                                          style={{ height: `${(yr.ai_engineer_median / maxVal) * 100}%`, marginTop: `${100 - (yr.ai_engineer_median / maxVal) * 100}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className={`text-[9px] font-bold mt-1 ${isCurrentYear ? 'text-brand' : 'text-gray-500'}`}>{yr.year}</div>
+                                    {isCurrentYear && <div className="text-[8px] text-brand font-bold">NOW</div>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="flex items-center space-x-4 mt-2">
+                              <div className="flex items-center space-x-1">
+                                <div className="h-2 w-2 rounded-full bg-purple-500"></div>
+                                <span className="text-[9px] text-gray-500">Senior AI</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <div className="h-2 w-2 rounded-full bg-indigo-500"></div>
+                                <span className="text-[9px] text-gray-500">AI Engineer</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-sm text-gray-500 bg-white rounded-xl border border-gray-200">Loading salary insights...</div>
+                  )}
                 </div>
-              ) : (
-                <div className="h-64 flex items-center justify-center text-sm text-gray-500">Synthesizing path timeline...</div>
-              )}
+              </div>{/* end two-column grid */}
 
               {/* Course Recommendations */}
               {gapData && (
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                    <GraduationCap className="h-4 w-4 text-brand" />
-                    <span>Recommended Curated Courses from Coursera</span>
-                  </h3>
-                  <p className="text-xs text-gray-500 mb-4">Courses matched dynamically to address your <strong className="text-red-600">missing skills</strong>.</p>
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mt-6">
+                  {/* Title and Scope Switcher */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 flex items-center space-x-2">
+                        <GraduationCap className="h-4 w-4 text-brand" />
+                        <span>Recommended Curated Courses</span>
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {courseSearchScope === 'recommended'
+                          ? "Courses dynamically matched to address your missing skills."
+                          : "Explore and search all available courses in the catalog."}
+                      </p>
+                    </div>
 
+                    {/* Scope toggle pills */}
+                    <div className="flex bg-gray-100 p-0.5 rounded-lg text-xs font-semibold shrink-0 self-start sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => { setCourseSearchScope('recommended'); setCourseSearchQuery(''); }}
+                        className={`px-3 py-1.5 rounded-md transition-all ${
+                          courseSearchScope === 'recommended'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-900'
+                        }`}
+                      >
+                        Recommended
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setCourseSearchScope('all'); setCourseSearchQuery(''); }}
+                        className={`px-3 py-1.5 rounded-md transition-all ${
+                          courseSearchScope === 'all'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-900'
+                        }`}
+                      >
+                        All Catalog
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search Input Bar */}
+                  <div className="mb-4 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={courseSearchQuery}
+                      onChange={(e) => setCourseSearchQuery(e.target.value)}
+                      placeholder={
+                        courseSearchScope === 'recommended'
+                          ? "Filter recommended courses by title, provider, or skills..."
+                          : "Search catalog by keyword (e.g. PyTorch, FastAPI, AWS)..."
+                      }
+                      className="w-full pl-10 pr-10 py-2.5 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand/40 outline-none transition-all placeholder:text-gray-400"
+                    />
+                    {courseSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setCourseSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Courses List */}
                   <div className="space-y-4">
-                    {gapData.recommended_courses.map((course, idx) => (
-                      <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors gap-4">
-                        <div className="flex items-start space-x-3">
-                          <div className="p-2 bg-blue-50 text-blue-600 rounded mt-1 shrink-0">
-                            <BookOpen className="h-4 w-4" />
+                    {courseSearchScope === 'all' && isSearchingCourses ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-xs text-gray-500">
+                        <RefreshCw className="h-5 w-5 animate-spin text-brand mb-2" />
+                        <span>Searching course catalog...</span>
+                      </div>
+                    ) : (() => {
+                      const displayedCourses = courseSearchScope === 'recommended'
+                        ? (gapData.recommended_courses || []).filter(course => {
+                            if (!courseSearchQuery) return true;
+                            const q = courseSearchQuery.toLowerCase();
+                            return (
+                              course.title.toLowerCase().includes(q) ||
+                              course.provider.toLowerCase().includes(q) ||
+                              course.skills_taught.some(s => s.toLowerCase().includes(q))
+                            );
+                          })
+                        : allCourses;
+
+                      if (displayedCourses.length === 0) {
+                        return (
+                          <div className="p-6 text-center text-xs text-gray-500 border border-dashed rounded-lg bg-gray-50">
+                            {courseSearchScope === 'recommended'
+                              ? "No matching recommended courses found for your missing skills."
+                              : "No courses found matching that search query in the catalog."}
                           </div>
-                          <div>
-                            <h4 className="text-xs font-bold text-gray-900">{course.title}</h4>
-                            <p className="text-[10px] text-gray-500 mt-0.5">{course.provider} • Duration: {course.duration}</p>
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {course.skills_taught.map((st, i) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] font-medium border border-gray-200">
-                                  Teaches: {st}
-                                </span>
-                              ))}
+                        );
+                      }
+
+                      return displayedCourses.map((course, idx) => (
+                        <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors gap-4">
+                          <div className="flex items-start space-x-3">
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded mt-1 shrink-0">
+                              <BookOpen className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-gray-900">{course.title}</h4>
+                              <p className="text-[10px] text-gray-500 mt-0.5">{course.provider} • Duration: {course.duration}</p>
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {course.skills_taught.map((st, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[9px] font-medium border border-gray-200">
+                                    Teaches: {st}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
                           </div>
+                          <div className="flex items-center space-x-4 self-end sm:self-center shrink-0">
+                            <span className="text-xs font-bold text-yellow-600">★ {course.rating}</span>
+                            <a
+                              href={course.link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center space-x-1 px-3 py-1.5 bg-brand text-white rounded text-xs font-semibold hover:bg-brand-light transition-all"
+                            >
+                              <span>Enroll Course</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-4 self-end sm:self-center shrink-0">
-                          <span className="text-xs font-bold text-yellow-600">★ {course.rating}</span>
-                          <a
-                            href={course.link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-brand text-white rounded text-xs font-semibold hover:bg-brand-light transition-all"
-                          >
-                            <span>Enroll Course</span>
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                    {gapData.recommended_courses.length === 0 && (
-                      <div className="p-6 text-center text-xs text-gray-500 border border-dashed rounded-lg bg-gray-50">
-                        No specific course sync recommendations available for your current skills gaps.
-                      </div>
-                    )}
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
@@ -1365,107 +1670,128 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           {/* TAB 5: PROFILE / SETTINGS */}
           {activeTab === 'profile' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-4xl mx-auto">
-              {/* Left column: Profile summary card */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                <div className="flex items-center space-x-3 mb-4">
-                  <div className="p-3 bg-brand/10 text-brand rounded-full">
-                    <User className="h-6 w-6" />
+            <div className="space-y-6 w-full">
+              {/* Profile Header Banner */}
+              <div className="bg-gradient-to-r from-brand to-brand-light text-white rounded-xl shadow-md p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex items-center space-x-4">
+                  <div className="p-4 bg-white/10 text-white rounded-full backdrop-blur-sm border border-white/20">
+                    <User className="h-8 w-8" />
                   </div>
                   <div>
-                    <h2 className="text-base font-bold text-gray-900">{user.name}</h2>
-                    <p className="text-sm text-gray-500">{user.current_role}</p>
+                    <h2 className="text-xl font-bold text-white">{user.name}</h2>
+                    <p className="text-sm text-blue-200 mt-0.5">{user.current_role}</p>
                   </div>
                 </div>
-                <div className="text-sm text-gray-700 border-t border-gray-100 pt-3 space-y-2">
-                  <p>Target role: <span className="font-semibold text-brand">{user.target_role}</span></p>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
+                <div className="flex flex-col md:items-end space-y-2">
+                  <p className="text-sm">
+                    <span className="text-blue-200">Target role:</span> <span className="font-semibold text-white">{user.target_role}</span>
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 md:justify-end">
                     {user.skills.map((sk, idx) => (
-                      <span key={idx} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium border border-blue-100">
+                      <span key={idx} className="px-2.5 py-0.5 bg-white/20 text-white rounded text-xs font-medium border border-white/10 backdrop-blur-sm">
                         {sk}
                       </span>
                     ))}
                   </div>
                 </div>
+              </div>
 
-                {/* CV Upload (inside left card) */}
-                <div className="mt-5 pt-4 border-t border-gray-100">
-                  <h3 className="text-sm font-bold text-gray-800 mb-3">Upload CV <span className="text-gray-400 font-normal">(Mock Parser)</span></h3>
-                  <form onSubmit={handleCvUpload} className="space-y-3">
-                    {cvSuccessMsg && (
+              {/* Bottom Cards: Forms & Editors */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+                {/* Left Card: CV Parser & Upload */}
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-4">
+                      <Upload className="h-5 w-5 text-brand" />
+                      <h3 className="text-sm font-bold text-gray-800">Upload &amp; Sync CV</h3>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-6 leading-relaxed">
+                      Upload your latest resume (PDF or DOCX). Our mock parser will automatically scan the document, identify key technical skills, and update your profile diagnostics in real-time.
+                    </p>
+
+                    <form onSubmit={handleCvUpload} className="space-y-4">
+                      {cvSuccessMsg && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
+                          {cvSuccessMsg}
+                        </div>
+                      )}
+                      <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 hover:border-brand/40 transition-colors bg-gray-50/50">
+                        <input
+                          id="cv-file-input"
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          required
+                          onChange={(e) => setCvFile(e.target.files[0])}
+                          className="block w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={!cvFile || cvUploadLoading}
+                        className="w-full flex items-center justify-center py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50 shadow-sm"
+                      >
+                        {cvUploadLoading ? (
+                          <>
+                            <RefreshCw className="animate-spin h-4 w-4 mr-2 text-gray-600" />
+                            <span>Parsing CV...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4 mr-2 text-gray-600" />
+                            <span>Upload &amp; Parse CV</span>
+                          </>
+                        )}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                {/* Right Card: Fast Diagnostics Editor */}
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <Zap className="h-5 w-5 text-brand" />
+                    <h3 className="text-sm font-bold text-gray-800">Fast Diagnostics Editor</h3>
+                  </div>
+                  <form onSubmit={handleSaveProfile} className="space-y-4">
+                    {profileSuccessMsg && (
                       <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
-                        {cvSuccessMsg}
+                        {profileSuccessMsg}
                       </div>
                     )}
-                    <input
-                      id="cv-file-input"
-                      type="file"
-                      accept=".pdf,.doc,.docx"
-                      required
-                      onChange={(e) => setCvFile(e.target.files[0])}
-                      className="block w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                    />
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Edit Skills (comma separated)</label>
+                      <textarea
+                        value={editSkills}
+                        onChange={(e) => setEditSkills(e.target.value)}
+                        className="block w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-brand focus:border-brand bg-white"
+                        rows="4"
+                        placeholder="Python, SQL, Git..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Change Target Role</label>
+                      <select
+                        value={editTargetRole}
+                        onChange={(e) => setEditTargetRole(e.target.value)}
+                        className="block w-full p-3 text-sm border border-gray-300 bg-white rounded-lg focus:ring-brand focus:border-brand cursor-pointer"
+                      >
+                        <option value="AI Engineer">AI Engineer</option>
+                        <option value="Machine Learning Engineer">Machine Learning Engineer</option>
+                        <option value="Cloud Architect">Cloud Architect</option>
+                        <option value="Data Analyst">Data Analyst</option>
+                        <option value="Full Stack Developer">Full Stack Developer</option>
+                      </select>
+                    </div>
                     <button
                       type="submit"
-                      disabled={!cvFile || cvUploadLoading}
-                      className="w-full flex items-center justify-center py-2 px-4 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50"
+                      disabled={isUpdatingProfile}
+                      className="w-full flex justify-center py-2.5 px-4 rounded-lg text-sm font-semibold text-white bg-brand hover:bg-brand-light transition-all disabled:opacity-50 shadow-sm"
                     >
-                      {cvUploadLoading ? (
-                        <>
-                          <RefreshCw className="animate-spin h-4 w-4 mr-2 text-gray-600" />
-                          <span>Parsing CV...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="h-4 w-4 mr-2 text-gray-600" />
-                          <span>Upload &amp; Parse CV</span>
-                        </>
-                      )}
+                      {isUpdatingProfile ? 'Recalculating...' : 'Update & Run Diagnostic'}
                     </button>
                   </form>
                 </div>
-              </div>
-
-              {/* Right column: Fast Diagnostics Editor */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                <h3 className="text-sm font-bold text-gray-800 mb-4">Fast Diagnostics Editor</h3>
-                <form onSubmit={handleSaveProfile} className="space-y-4">
-                  {profileSuccessMsg && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
-                      {profileSuccessMsg}
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Edit Skills <span className="text-gray-400">(comma separated)</span></label>
-                    <textarea
-                      value={editSkills}
-                      onChange={(e) => setEditSkills(e.target.value)}
-                      className="block w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-brand focus:border-brand bg-white"
-                      rows="4"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Change Target Role</label>
-                    <select
-                      value={editTargetRole}
-                      onChange={(e) => setEditTargetRole(e.target.value)}
-                      className="block w-full p-3 text-sm border border-gray-300 bg-white rounded-lg focus:ring-brand focus:border-brand"
-                    >
-                      <option value="AI Engineer">AI Engineer</option>
-                      <option value="Machine Learning Engineer">Machine Learning Engineer</option>
-                      <option value="Cloud Architect">Cloud Architect</option>
-                      <option value="Data Analyst">Data Analyst</option>
-                      <option value="Full Stack Developer">Full Stack Developer</option>
-                    </select>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={isUpdatingProfile}
-                    className="w-full flex justify-center py-2.5 px-4 rounded-lg text-sm font-semibold text-white bg-brand hover:bg-brand-light transition-all disabled:opacity-50"
-                  >
-                    {isUpdatingProfile ? 'Recalculating...' : 'Update & Run Diagnostic'}
-                  </button>
-                </form>
               </div>
             </div>
           )}

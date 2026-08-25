@@ -3,7 +3,7 @@ from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from mock_data import DEFAULT_USERS, JOBS, COURSES, SKILL_TRENDS, SKILL_DEMAND_VS_SUPPLY, CANDIDATES, SCRAPERS
+from mock_data import DEFAULT_USERS, JOBS, COURSES, SKILL_TRENDS, SKILL_DEMAND_VS_SUPPLY, CANDIDATES, SCRAPERS, SALARY_INSIGHTS
 
 app = Flask(__name__)
 # Enable CORS for all routes to allow frontend connection
@@ -702,6 +702,71 @@ def upload_cv():
         "user": {k: v for k, v in user.items() if k != "password"}
     }), 200
 
+# API to get all courses, optionally searching by keyword/query
+@app.route("/api/courses", methods=["GET"])
+def get_courses():
+    query = request.args.get("query", "").strip().lower()
+    if query:
+        filtered = []
+        for course in COURSES:
+            course_text = f"{course['title']} {course['provider']} {' '.join(course['skills_taught'])}".lower()
+            if query in course_text:
+                filtered.append(course)
+        return jsonify(filtered), 200
+    return jsonify(COURSES), 200
+
+# Salary insights for Career Path Planning motivation panel
+@app.route("/api/salary-insights", methods=["POST"])
+def salary_insights():
+    data = request.json or {}
+    current_role = data.get("current_role", "Junior Python Developer")
+    target_role  = data.get("target_role", "AI Engineer")
+    missing_skills = data.get("missing_skills", [])
+
+    role_ranges = SALARY_INSIGHTS["role_salary_ranges"]
+    skill_impact_all = SALARY_INSIGHTS["skill_salary_impact"]
+    yearly_forecast  = SALARY_INSIGHTS["yearly_forecast"]
+
+    # Get salary ranges — fall back gracefully
+    def best_match(role):
+        if role in role_ranges:
+            return role_ranges[role]
+        # Fuzzy match by keywords
+        role_l = role.lower()
+        for key, val in role_ranges.items():
+            if any(word in role_l for word in key.lower().split()):
+                return val
+        return {"min": 100000, "max": 200000, "median": 150000}
+
+    current_salary  = best_match(current_role)
+    target_salary   = best_match(target_role)
+    salary_uplift   = target_salary["median"] - current_salary["median"]
+    uplift_pct      = round((salary_uplift / current_salary["median"]) * 100) if current_salary["median"] else 0
+
+    # Filter skill salary impacts to only the user's missing skills
+    missing_set = {s.lower() for s in missing_skills}
+    relevant_skill_impacts = [
+        s for s in skill_impact_all
+        if s["skill"].lower() in missing_set
+    ]
+    # If no missing skills match, return top 5 by boost value
+    if not relevant_skill_impacts:
+        relevant_skill_impacts = sorted(skill_impact_all, key=lambda x: x["avg_boost_lkr"], reverse=True)[:5]
+    else:
+        relevant_skill_impacts = sorted(relevant_skill_impacts, key=lambda x: x["avg_boost_lkr"], reverse=True)
+
+    return jsonify({
+        "current_role":   current_role,
+        "target_role":    target_role,
+        "current_salary": current_salary,
+        "target_salary":  target_salary,
+        "salary_uplift":  salary_uplift,
+        "uplift_pct":     uplift_pct,
+        "skill_impacts":  relevant_skill_impacts,
+        "yearly_forecast": yearly_forecast
+    }), 200
+
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
+
 

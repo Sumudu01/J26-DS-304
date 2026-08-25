@@ -200,3 +200,38 @@ SCRAPERS = {
     "survey": {"name": "Survey & CV Collector", "status": "Idle", "last_run": "2026-08-23 12:45", "records_found": 34}
 }
 
+# Salary insight data per skill — used in Career Path Planning motivation panel
+SALARY_INSIGHTS = {
+    "skill_salary_impact": [
+        {"skill": "Python",           "avg_boost_lkr": 25000,  "demand_index": 92, "category": "foundational"},
+        {"skill": "Machine Learning", "avg_boost_lkr": 80000,  "demand_index": 88, "category": "advanced"},
+        {"skill": "Generative AI",    "avg_boost_lkr": 120000, "demand_index": 95, "category": "cutting-edge"},
+        {"skill": "NLP",              "avg_boost_lkr": 90000,  "demand_index": 80, "category": "advanced"},
+        {"skill": "AWS",              "avg_boost_lkr": 65000,  "demand_index": 84, "category": "cloud"},
+        {"skill": "Docker",           "avg_boost_lkr": 45000,  "demand_index": 76, "category": "devops"},
+        {"skill": "Prompt Engineering","avg_boost_lkr": 75000, "demand_index": 79, "category": "cutting-edge"},
+        {"skill": "API Development",  "avg_boost_lkr": 35000,  "demand_index": 82, "category": "foundational"},
+        {"skill": "SQL",              "avg_boost_lkr": 20000,  "demand_index": 85, "category": "foundational"},
+        {"skill": "PyTorch",          "avg_boost_lkr": 85000,  "demand_index": 83, "category": "advanced"},
+    ],
+    "role_salary_ranges": {
+        "Junior Python Developer":    {"min": 80000,  "max": 150000, "median": 110000},
+        "AI Associate Engineer":      {"min": 180000, "max": 260000, "median": 210000},
+        "Machine Learning Engineer":  {"min": 300000, "max": 450000, "median": 370000},
+        "AI Engineer":                {"min": 250000, "max": 420000, "median": 320000},
+        "Senior AI Engineer":         {"min": 450000, "max": 650000, "median": 540000},
+        "Senior AI Architect":        {"min": 600000, "max": 800000, "median": 700000},
+        "Data Analyst":               {"min": 120000, "max": 220000, "median": 165000},
+        "Data Scientist":             {"min": 280000, "max": 450000, "median": 355000},
+        "Cloud Engineer":             {"min": 200000, "max": 380000, "median": 290000},
+        "DevOps Engineer":            {"min": 220000, "max": 400000, "median": 305000},
+    },
+    "yearly_forecast": [
+        {"year": 2025, "ai_engineer_median": 290000, "ml_engineer_median": 340000, "senior_ai_median": 500000},
+        {"year": 2026, "ai_engineer_median": 320000, "ml_engineer_median": 370000, "senior_ai_median": 540000},
+        {"year": 2027, "ai_engineer_median": 365000, "ml_engineer_median": 420000, "senior_ai_median": 610000},
+        {"year": 2028, "ai_engineer_median": 410000, "ml_engineer_median": 480000, "senior_ai_median": 695000},
+        {"year": 2029, "ai_engineer_median": 460000, "ml_engineer_median": 540000, "senior_ai_median": 790000},
+    ]
+}
+
