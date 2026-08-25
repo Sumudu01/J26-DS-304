@@ -68,7 +68,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
             <span className="text-blue-400">Future Job Market</span>
           </h1>
           <p className="text-lg sm:text-xl text-gray-300 max-w-3xl mx-auto mb-10 leading-relaxed">
-            Emploeralk is an intelligent recruiter and job alignment platform that maps talent profiles to real industry demands. We analyze data from LinkedIn, Indeed, and TopJobs.lk to find your skill gaps and pave your career roadmap.
+            Emploreralk is an intelligent recruiter and job alignment platform that maps talent profiles to real industry demands. We analyze data from LinkedIn, Indeed, and TopJobs.lk to find your skill gaps and pave your career roadmap.
           </p>
           <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
             <button
@@ -155,7 +155,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
             <span className="text-xs font-semibold tracking-wider text-brand uppercase">Integrated Data Pipeline</span>
             <h2 className="text-3xl font-bold text-gray-900 mt-2 sm:text-4xl">Multi-Platform Gathering</h2>
             <p className="mt-4 text-gray-600 leading-relaxed">
-              Emploeralk continuously gathers, processes, and structured datasets from external endpoints to populate its diagnostic algorithms. It connects with major channels to support matching calculations:
+              Emploreralk continuously gathers, processes, and structured datasets from external endpoints to populate its diagnostic algorithms. It connects with major channels to support matching calculations:
             </p>
             <div className="mt-8 space-y-4">
               <div className="flex items-start space-x-3">
@@ -205,7 +205,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
             </div>
             <div className="mt-6 border-t border-white/10 pt-4 flex justify-between text-xs text-gray-400 font-mono">
               <span>DB Status: Connected</span>
-              <span>Platform: Emploeralk AI</span>
+              <span>Platform: Emploreralk AI</span>
             </div>
           </div>
         </div>
@@ -237,7 +237,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
 
       {/* Call to action */}
       <section className="bg-white py-16 px-4 text-center">
-        <h2 className="text-3xl font-bold text-gray-900">Ready to explore Emploeralk?</h2>
+        <h2 className="text-3xl font-bold text-gray-900">Ready to explore Emploreralk?</h2>
         <p className="text-gray-600 mt-2 max-w-xl mx-auto">Sign up for a free prototype demo account and see how our logic matches skills instantly.</p>
         <div className="mt-8 flex justify-center space-x-4">
           <button 
@@ -260,7 +260,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center text-sm">
           <div className="flex items-center space-x-2">
             <Logo className="h-6 w-auto" light={true} />
-            <span>Contact Team: emploeralk@gmail.com</span>
+            <span>Contact Team: emploreralk@gmail.com</span>
           </div>
           <span>© 2026. All rights reserved.</span>
           
