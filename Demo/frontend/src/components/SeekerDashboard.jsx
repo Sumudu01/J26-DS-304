@@ -5,7 +5,7 @@ import {
   TrendingUp, FileSearch, Milestone, CheckSquare, 
   User, Upload, BookOpen, GraduationCap, Briefcase, 
   MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
-  LogOut, Bell, X
+  LogOut, Bell, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle
 } from 'lucide-react'
 
 function SeekerDashboard({ user, onUpdateUser, onLogout }) {
@@ -65,6 +65,13 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   // API response states
   const [demandData, setDemandData] = useState([])
   const [forecastHorizon, setForecastHorizon] = useState('2029') // 2027, 2028, 2029
+
+  // Search demand state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResult, setSearchResult] = useState(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [hasSearched, setHasSearched] = useState(false)
   const [gapData, setGapData] = useState(null)
   const [careerData, setCareerData] = useState(null)
   const [matchedJobs, setMatchedJobs] = useState([])
@@ -131,6 +138,44 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     } catch (e) {
       console.error("Error loading matched jobs", e)
     }
+  }
+
+  // Search for skill/job demand
+  const searchSkillDemand = async (e) => {
+    e && e.preventDefault()
+    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      setSearchError('Please enter at least 2 characters to search.')
+      return
+    }
+    setSearchLoading(true)
+    setSearchError('')
+    setSearchResult(null)
+    setHasSearched(true)
+    try {
+      const res = await fetch(`${API_URL}/search-demand`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: searchQuery.trim() })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSearchResult(data)
+      } else {
+        setSearchError(data.error || 'Search failed.')
+      }
+    } catch (err) {
+      console.error('Search demand error', err)
+      setSearchError('Network error. Please try again.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const clearSearch = () => {
+    setSearchQuery('')
+    setSearchResult(null)
+    setSearchError('')
+    setHasSearched(false)
   }
 
   // Save manual profile edits
@@ -426,6 +471,261 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* TAB 1: MARKET DEMAND FORECASTING */}
           {activeTab === 'demand' && (
             <div className="space-y-6">
+
+              {/* ── SEARCH SKILL / JOB DEMAND ── */}
+              <div className="bg-gradient-to-br from-brand/[0.03] via-white to-blue-50/50 p-6 rounded-xl border border-brand/10 shadow-sm">
+                <div className="flex items-center space-x-2 mb-4">
+                  <div className="p-2 bg-brand/10 rounded-lg">
+                    <Search className="h-4 w-4 text-brand" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Search Skill or Job Demand</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Look up any skill, technology, or job role to see its current market demand</p>
+                  </div>
+                </div>
+
+                {/* Search Input */}
+                <form onSubmit={searchSkillDemand} className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder='Try "Machine Learning", "AWS", "React", "AI Engineer"...'
+                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand/40 outline-none transition-all placeholder:text-gray-400"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={searchLoading}
+                    className="px-5 py-2.5 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-50 flex items-center space-x-1.5"
+                  >
+                    {searchLoading ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Search className="h-4 w-4" />
+                    )}
+                    <span>{searchLoading ? 'Searching...' : 'Search'}</span>
+                  </button>
+                  {hasSearched && (
+                    <button
+                      type="button"
+                      onClick={clearSearch}
+                      className="px-3 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </form>
+
+                {searchError && (
+                  <div className="mt-3 flex items-center space-x-2 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{searchError}</span>
+                  </div>
+                )}
+
+                {/* ── Search Results ── */}
+                {searchResult && (
+                  <div className="mt-5 space-y-4 animate-in fade-in" style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
+                    {/* Result Header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-bold text-gray-900">Results for</span>
+                        <span className="px-2.5 py-0.5 bg-brand/10 text-brand text-xs font-bold rounded-full">"{searchResult.query}"</span>
+                        {searchResult.matched_skill_category && (
+                          <span className="text-xs text-gray-400">→ mapped to <span className="font-semibold text-gray-600">{searchResult.matched_skill_category}</span></span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metrics Cards Row */}
+                    {searchResult.matched_skill_category ? (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {/* Current Demand */}
+                        <div className="bg-white rounded-lg border border-gray-100 p-3.5 shadow-sm">
+                          <div className="flex items-center space-x-1.5 mb-1.5">
+                            <BarChart3 className="h-3.5 w-3.5 text-blue-500" />
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase">Current Demand</span>
+                          </div>
+                          <span className="text-xl font-extrabold text-gray-900">{searchResult.current_demand_index}</span>
+                          <span className="text-[10px] text-gray-400 ml-1">/ 150 index</span>
+                        </div>
+
+                        {/* YoY Growth */}
+                        <div className="bg-white rounded-lg border border-gray-100 p-3.5 shadow-sm">
+                          <div className="flex items-center space-x-1.5 mb-1.5">
+                            <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase">YoY Growth</span>
+                          </div>
+                          <span className={`text-xl font-extrabold ${searchResult.yoy_growth_percent > 0 ? 'text-emerald-600' : searchResult.yoy_growth_percent < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                            {searchResult.yoy_growth_percent > 0 ? '+' : ''}{searchResult.yoy_growth_percent}%
+                          </span>
+                        </div>
+
+                        {/* Demand Status */}
+                        <div className="bg-white rounded-lg border border-gray-100 p-3.5 shadow-sm">
+                          <div className="flex items-center space-x-1.5 mb-1.5">
+                            <Zap className="h-3.5 w-3.5 text-amber-500" />
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase">Status</span>
+                          </div>
+                          <span className={`text-sm font-bold ${
+                            searchResult.demand_status === 'High & Growing' ? 'text-emerald-600' :
+                            searchResult.demand_status === 'Declining' ? 'text-red-600' : 'text-amber-600'
+                          }`}>
+                            {searchResult.demand_status}
+                          </span>
+                        </div>
+
+                        {/* 2029 Forecast */}
+                        <div className="bg-white rounded-lg border border-gray-100 p-3.5 shadow-sm">
+                          <div className="flex items-center space-x-1.5 mb-1.5">
+                            <ArrowUpRight className="h-3.5 w-3.5 text-indigo-500" />
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase">2029 Forecast</span>
+                          </div>
+                          <span className="text-xl font-extrabold text-gray-900">{searchResult.forecast_2029_index}</span>
+                          <span className={`text-[10px] ml-1 font-semibold ${
+                            searchResult.forecast_growth_percent > 0 ? 'text-emerald-600' : 'text-red-600'
+                          }`}>
+                            ({searchResult.forecast_growth_percent > 0 ? '+' : ''}{searchResult.forecast_growth_percent}%)
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-amber-50 border border-amber-100 rounded-lg p-4 text-xs text-amber-700 flex items-start space-x-2">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold">No trend data found</span> for "{searchResult.query}". This skill is not currently tracked in our demand index.
+                          {searchResult.related_jobs_count > 0 && <span> However, we found <span className="font-bold">{searchResult.related_jobs_count} related job(s)</span> below.</span>}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Trend Mini-Chart */}
+                    {searchResult.trend_timeline.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
+                        <h4 className="text-xs font-bold text-gray-700 mb-3 flex items-center space-x-1.5">
+                          <BarChart3 className="h-3.5 w-3.5 text-brand" />
+                          <span>Demand Trend for {searchResult.matched_skill_category} (2022 – 2029)</span>
+                        </h4>
+                        {(() => {
+                          const maxVal = 150
+                          const barMaxH = 120 // max bar height in px
+                          return (
+                            <div className="relative pl-8">
+                              {/* Y-axis labels */}
+                              <div className="absolute left-0 top-0 flex flex-col justify-between text-[9px] text-gray-400 font-medium select-none" style={{ height: `${barMaxH}px` }}>
+                                <span>150</span>
+                                <span>100</span>
+                                <span>50</span>
+                                <span>0</span>
+                              </div>
+                              {/* Horizontal grid lines */}
+                              <div className="absolute left-8 right-0 top-0" style={{ height: `${barMaxH}px` }}>
+                                {[0, 1, 2, 3].map(i => (
+                                  <div key={i} className="absolute w-full border-t border-gray-100" style={{ top: `${(i / 3) * 100}%` }} />
+                                ))}
+                              </div>
+                              {/* Bars */}
+                              <div className="flex items-end justify-around border-b border-gray-200" style={{ height: `${barMaxH}px` }}>
+                                {searchResult.trend_timeline.map((point, i) => {
+                                  const barH = Math.max(4, (point.value / maxVal) * barMaxH)
+                                  return (
+                                    <div key={i} className="flex flex-col items-center group relative" style={{ flex: 1 }}>
+                                      {/* Value label */}
+                                      <div className="text-[9px] font-bold text-brand mb-1 select-none">{point.value}</div>
+                                      {/* Bar */}
+                                      <div
+                                        style={{ height: `${barH}px` }}
+                                        className={`w-5 md:w-6 rounded-t transition-all duration-500 hover:scale-105 cursor-default ${
+                                          point.is_forecast
+                                            ? 'bg-gradient-to-t from-brand/30 to-brand/50 border border-dashed border-brand/50'
+                                            : 'bg-gradient-to-t from-brand to-brand-light'
+                                        }`}
+                                        title={`${point.year}: ${point.value}`}
+                                      />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              {/* Year labels */}
+                              <div className="flex justify-around mt-1.5">
+                                {searchResult.trend_timeline.map((point, i) => (
+                                  <div key={i} className="flex flex-col items-center" style={{ flex: 1 }}>
+                                    <span className={`text-[10px] font-bold ${point.is_forecast ? 'text-blue-600' : 'text-gray-700'}`}>{point.year}</span>
+                                    {point.is_forecast && <span className="text-[8px] text-blue-500 font-semibold uppercase leading-tight">Forecast</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })()}
+                        <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-gray-400">
+                          <div className="flex items-center space-x-1.5"><span className="h-2.5 w-5 rounded bg-gradient-to-t from-brand to-brand-light inline-block"></span><span>Historical</span></div>
+                          <div className="flex items-center space-x-1.5"><span className="h-2.5 w-5 rounded bg-brand/40 border border-dashed border-brand/50 inline-block"></span><span>Forecasted</span></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Supply-Demand Gap */}
+                    {searchResult.supply_demand_gap && (
+                      <div className="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
+                        <h4 className="text-xs font-bold text-gray-700 mb-3 flex items-center space-x-1.5">
+                          <Layers className="h-3.5 w-3.5 text-orange-500" />
+                          <span>Supply vs Demand Gap — {searchResult.supply_demand_gap.skill}</span>
+                        </h4>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="text-center">
+                            <div className="text-lg font-extrabold text-blue-600">{searchResult.supply_demand_gap.demand}%</div>
+                            <div className="text-[10px] text-gray-400 font-semibold uppercase">Market Demand</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-lg font-extrabold text-emerald-600">{searchResult.supply_demand_gap.supply}%</div>
+                            <div className="text-[10px] text-gray-400 font-semibold uppercase">Talent Supply</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-lg font-extrabold text-red-600">{searchResult.supply_demand_gap.gap}%</div>
+                            <div className="text-[10px] text-gray-400 font-semibold uppercase">Shortage Gap</div>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-amber-400 to-red-500" style={{ width: `${searchResult.supply_demand_gap.gap}%` }}></div>
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1.5">A higher gap means more opportunity — employers are struggling to find talent.</p>
+                      </div>
+                    )}
+
+                    {/* Related Jobs */}
+                    {searchResult.related_jobs.length > 0 && (
+                      <div className="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
+                        <h4 className="text-xs font-bold text-gray-700 mb-3 flex items-center space-x-1.5">
+                          <Briefcase className="h-3.5 w-3.5 text-brand" />
+                          <span>Related Open Positions ({searchResult.related_jobs.length})</span>
+                        </h4>
+                        <div className="space-y-2">
+                          {searchResult.related_jobs.map((job, i) => (
+                            <div key={i} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-100 hover:border-brand/20 hover:bg-brand/[0.02] transition-all group">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold text-gray-800 group-hover:text-brand transition-colors truncate">{job.title}</div>
+                                <div className="text-[10px] text-gray-500 flex items-center gap-2 mt-0.5">
+                                  <span>{job.company}</span>
+                                  <span className="text-gray-300">•</span>
+                                  <span className="flex items-center"><MapPin className="h-2.5 w-2.5 mr-0.5" />{job.location}</span>
+                                  <span className="text-gray-300">•</span>
+                                  <span className="font-medium text-emerald-600">{job.salary}</span>
+                                </div>
+                              </div>
+                              <span className="text-[9px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-semibold shrink-0 ml-2">{job.platform}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                 <div className="flex justify-between items-center mb-6">
                   <div>
@@ -545,7 +845,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                   <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center text-emerald-700">
-                    📈 Rapidly Ascending Core Skills
+                    📈 Rapidly Emerging Skills
                   </h3>
                   <div className="space-y-3">
                     <div className="flex justify-between items-center text-xs">
@@ -565,7 +865,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                   <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center text-red-700">
-                    📉 Descending Core Skills
+                    📉 Gradually Declining Skills
                   </h3>
                   <div className="space-y-3">
                     <div className="flex justify-between items-center text-xs">

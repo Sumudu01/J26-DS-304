@@ -115,6 +115,134 @@ def update_profile():
     user_info = {k: v for k, v in user.items() if k != "password"}
     return jsonify({"status": "success", "user": user_info}), 200
 
+# Search Demand: Skill / Job Opportunity lookup
+@app.route("/api/search-demand", methods=["POST"])
+def search_demand():
+    data = request.json or {}
+    query = data.get("query", "").strip()
+
+    if not query or len(query) < 2:
+        return jsonify({"error": "Please enter at least 2 characters"}), 400
+
+    q_lower = query.lower()
+
+    # ── 1. Check SKILL_TRENDS for matching skill category ──
+    skill_keys = ["Generative AI", "Python", "Cloud Computing", "Traditional Web", "COBOL/Legacy"]
+    matched_skill = None
+    for sk in skill_keys:
+        if q_lower in sk.lower() or sk.lower() in q_lower:
+            matched_skill = sk
+            break
+
+    # Broader alias mapping for common search terms
+    aliases = {
+        "ai": "Generative AI", "artificial intelligence": "Generative AI",
+        "llm": "Generative AI", "nlp": "Generative AI", "machine learning": "Generative AI",
+        "ml": "Generative AI", "deep learning": "Generative AI", "rag": "Generative AI",
+        "prompt": "Generative AI", "chatgpt": "Generative AI", "gpt": "Generative AI",
+        "python": "Python", "django": "Python", "flask": "Python", "fastapi": "Python",
+        "pandas": "Python", "pytorch": "Python", "tensorflow": "Python",
+        "cloud": "Cloud Computing", "aws": "Cloud Computing", "azure": "Cloud Computing",
+        "docker": "Cloud Computing", "kubernetes": "Cloud Computing", "devops": "Cloud Computing",
+        "web": "Traditional Web", "html": "Traditional Web", "css": "Traditional Web",
+        "javascript": "Traditional Web", "react": "Traditional Web", "angular": "Traditional Web",
+        "vue": "Traditional Web", "frontend": "Traditional Web", "full stack": "Traditional Web",
+        "cobol": "COBOL/Legacy", "mainframe": "COBOL/Legacy", "legacy": "COBOL/Legacy",
+        "data science": "Python", "data analyst": "Python", "data engineering": "Python",
+    }
+    if not matched_skill:
+        for alias, sk in aliases.items():
+            if alias in q_lower or q_lower in alias:
+                matched_skill = sk
+                break
+
+    # Build trend timeline & metrics
+    trend_timeline = []
+    current_demand = 0
+    previous_demand = 0
+    forecast_demand = 0
+    demand_status = "Not Tracked"
+
+    if matched_skill:
+        for entry in SKILL_TRENDS:
+            trend_timeline.append({
+                "year": entry["year"],
+                "value": entry[matched_skill],
+                "is_forecast": entry["year"] > 2026
+            })
+            if entry["year"] == 2026:
+                current_demand = entry[matched_skill]
+            if entry["year"] == 2025:
+                previous_demand = entry[matched_skill]
+            if entry["year"] == 2029:
+                forecast_demand = entry[matched_skill]
+
+        yoy_growth = round(((current_demand - previous_demand) / previous_demand) * 100, 1) if previous_demand else 0
+        forecast_growth = round(((forecast_demand - current_demand) / current_demand) * 100, 1) if current_demand else 0
+
+        if yoy_growth > 10:
+            demand_status = "High & Growing"
+        elif yoy_growth > 0:
+            demand_status = "Moderate & Stable"
+        else:
+            demand_status = "Declining"
+    else:
+        yoy_growth = 0
+        forecast_growth = 0
+
+    # ── 2. Find related jobs ──
+    related_jobs = []
+    for job in JOBS:
+        title_match = q_lower in job["title"].lower()
+        skill_match = any(q_lower in s.lower() or s.lower() in q_lower for s in job["required_skills"])
+        if title_match or skill_match:
+            related_jobs.append({
+                "id": job["id"],
+                "title": job["title"],
+                "company": job["company"],
+                "platform": job["platform"],
+                "location": job["location"],
+                "salary": job["salary"],
+                "required_skills": job["required_skills"],
+                "posted_date": job["posted_date"]
+            })
+
+    # ── 3. Supply-demand gap info ──
+    gap_info = None
+    for item in SKILL_DEMAND_VS_SUPPLY:
+        if q_lower in item["skill"].lower() or item["skill"].lower() in q_lower:
+            gap_info = item
+            break
+    if not gap_info and matched_skill:
+        for item in SKILL_DEMAND_VS_SUPPLY:
+            if matched_skill.lower() in item["skill"].lower() or item["skill"].lower() in matched_skill.lower():
+                gap_info = item
+                break
+
+    # ── 4. Related courses ──
+    related_courses = []
+    for course in COURSES:
+        course_match = any(q_lower in s.lower() or s.lower() in q_lower for s in course["skills_taught"])
+        title_match = q_lower in course["title"].lower()
+        if course_match or title_match:
+            related_courses.append(course)
+
+    return jsonify({
+        "query": query,
+        "matched_skill_category": matched_skill,
+        "demand_status": demand_status,
+        "current_demand_index": current_demand,
+        "yoy_growth_percent": yoy_growth,
+        "forecast_growth_percent": forecast_growth,
+        "forecast_2029_index": forecast_demand,
+        "trend_timeline": trend_timeline,
+        "related_jobs": related_jobs,
+        "related_jobs_count": len(related_jobs),
+        "supply_demand_gap": gap_info,
+        "related_courses": related_courses,
+        "related_courses_count": len(related_courses)
+    }), 200
+
 # Module 1: Demand Forecasting
 @app.route("/api/demand-forecast", methods=["GET"])
 def demand_forecast():
