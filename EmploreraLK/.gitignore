@@ -1,0 +1,7 @@
+# Real environment files — never commit
+.env
+.env.local
+.env.*.local
+
+# Keep the template
+!.env.example
