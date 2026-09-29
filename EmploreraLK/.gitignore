@@ -6,9 +6,18 @@
 .env.*.local
 .env.production
 .env.development
+.env.staging
 
-# Keep the template (so teammates know what vars are needed)
+# Keep the templates (so teammates know what vars are needed)
 !.env.example
+!**/.env.example
+
+# OAuth tokens / service account keys — never commit these
+*credentials*.json
+*service_account*.json
+google_oauth_token.json
+token.json
+client_secret*.json
 
 
 # ─────────────────────────────────────────────
@@ -142,10 +151,17 @@ frontend/.vite/
 frontend/*.local
 frontend/node_modules/
 frontend/.cache/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # TypeScript build info
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# Vite / rollup cache
+.vite/
+.rollup.cache/
 
 
 # ─────────────────────────────────────────────
@@ -155,6 +171,12 @@ tsconfig.tsbuildinfo
 backend/.env
 backend/.env.*
 !backend/.env.example
+
+# Google OAuth / Cloud credentials
+backend/credentials/
+backend/google_token.json
+backend/*_credentials.json
+backend/*_service_account.json
 
 # JWT / secret key files
 *.pem
@@ -222,5 +244,26 @@ backend/notebooks/.ipynb_checkpoints/
 # ─────────────────────────────────────────────
 # Docker (if containerised later)
 # ─────────────────────────────────────────────
-.dockerignore
+# NOTE: .dockerignore should be committed — do NOT ignore it
 docker-compose.override.yml
+docker-compose.local.yml
+
+
+# ─────────────────────────────────────────────
+# Package manager locks — keep these!
+# ─────────────────────────────────────────────
+# (already tracked by default — listed here as a reminder)
+# !package-lock.json
+# !pnpm-lock.yaml
+# !yarn.lock
+
+
+# ─────────────────────────────────────────────
+# Temporary / scratch files
+# ─────────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.orig
+scratch/
+tmp/

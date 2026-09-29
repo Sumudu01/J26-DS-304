@@ -3,6 +3,8 @@ import Logo from './Logo.jsx'
 import { API_URL } from '../App'
 import { ArrowLeft, Loader2, Eye, EyeOff } from 'lucide-react'
 
+const BACKEND_URL = 'http://127.0.0.1:5000'
+
 // Social login placeholder SVGs
 const GoogleIcon = () => (
   <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
@@ -19,39 +21,37 @@ const LinkedInIcon = () => (
   </svg>
 )
 
-const SocialButtons = () => (
-  <>
-    {/* Social Divider */}
-    <div className="relative my-4">
-      <div className="absolute inset-0 flex items-center" aria-hidden="true">
-        <div className="w-full border-t border-gray-200"></div>
-      </div>
-      <div className="relative flex justify-center text-xs uppercase">
-        <span className="bg-white px-2 text-gray-400 tracking-wider">Or continue with</span>
-      </div>
-    </div>
+const SocialButtons = () => {
+  const handleGoogleLogin = () => {
+    // Redirect browser to backend which will redirect to Google consent screen
+    window.location.href = `${BACKEND_URL}/api/auth/google/login`
+  }
 
-    {/* Social Buttons */}
-    <div className="grid grid-cols-2 gap-3">
+  return (
+    <>
+      {/* Social Divider */}
+      <div className="relative my-4">
+        <div className="absolute inset-0 flex items-center" aria-hidden="true">
+          <div className="w-full border-t border-gray-200"></div>
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-white px-2 text-gray-400 tracking-wider">Or continue with</span>
+        </div>
+      </div>
+
+      {/* Google Sign-In Button */}
       <button
         type="button"
-        className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        onClick={() => alert('Google authentication is not configured in this demo.')}
+        id="google-signin-btn"
+        className="w-full inline-flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100 transition-all duration-150"
+        onClick={handleGoogleLogin}
       >
         <GoogleIcon />
-        <span>Google</span>
+        <span>Continue with Google</span>
       </button>
-      <button
-        type="button"
-        className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        onClick={() => alert('LinkedIn authentication is not configured in this demo.')}
-      >
-        <LinkedInIcon />
-        <span>LinkedIn</span>
-      </button>
-    </div>
-  </>
-)
+    </>
+  )
+}
 
 function LoginSignup({ onLogin, onNavigate, isSignup }) {
   // Input fields state
@@ -106,7 +106,8 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
         throw new Error(data.error || 'Something went wrong. Please check inputs.')
       }
 
-      onLogin(data.user)
+      // Pass both user and token to the parent handler
+      onLogin(data.user, data.token)
     } catch (err) {
       setError(err.message)
     } finally {

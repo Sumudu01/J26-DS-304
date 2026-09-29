@@ -1,6 +1,12 @@
+import json
+import logging
+import urllib.parse
 from datetime import timedelta
 from typing import Union
-from fastapi import APIRouter, Depends, HTTPException, status
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -14,8 +20,18 @@ from app.schemas.auth import (
     AuthResponse,
 )
 
+logger = logging.getLogger("emploreralk.auth")
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# ─── Google OAuth2 constants ─────────────────────────────────────────────────
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+GOOGLE_SCOPE = "openid email profile"
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _user_to_response(user: User) -> UserResponse:
     """Convert a User ORM object to a UserResponse dict/schema."""
@@ -29,9 +45,20 @@ def _user_to_response(user: User) -> UserResponse:
         skills=user.get_skills_list(),
         company=user.company,
         is_active=user.is_active,
+        avatar_url=user.avatar_url,
         created_at=user.created_at,
     )
 
+
+def _mint_token(user: User) -> str:
+    """Create a JWT access token for the given user."""
+    return create_access_token(
+        subject=user.email,
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+
+# ─── Standard email / password routes ────────────────────────────────────────
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
@@ -74,10 +101,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     db.refresh(user)
 
     # 5. Generate JWT token
-    access_token = create_access_token(
-        subject=user.email,
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+    access_token = _mint_token(user)
 
     return AuthResponse(
         user=_user_to_response(user),
@@ -95,8 +119,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     # 1. Look up user by email
     user = db.query(User).filter(User.email == payload.email).first()
 
-    # 2. Validate credentials (same error for both missing user and wrong password — avoids email enumeration)
-    if not user or not verify_password(payload.password, user.hashed_password):
+    # 2. Validate credentials
+    if not user or not user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -109,10 +139,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         )
 
     # 3. Generate JWT token
-    access_token = create_access_token(
-        subject=user.email,
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+    access_token = _mint_token(user)
 
     return AuthResponse(
         user=_user_to_response(user),
@@ -126,3 +153,139 @@ def get_me(current_user: User = Depends(get_current_user)):
     """Return the currently authenticated user's profile."""
     return _user_to_response(current_user)
 
+
+# ─── Google OAuth2 routes ─────────────────────────────────────────────────────
+
+@router.get("/google/login", summary="Redirect user to Google OAuth2 consent screen")
+def google_login():
+    """
+    Build the Google OAuth2 authorization URL and redirect the browser to it.
+    The frontend simply calls window.location.href = '/api/auth/google/login'.
+    """
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google OAuth is not configured on this server.",
+        )
+
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": GOOGLE_SCOPE,
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+    auth_url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
+    return RedirectResponse(url=auth_url)
+
+
+@router.get("/google/callback", summary="Handle Google OAuth2 callback")
+async def google_callback(
+    code: str = Query(..., description="Authorization code from Google"),
+    db: Session = Depends(get_db),
+):
+    """
+    Exchange the authorization code for tokens, fetch the user profile from
+    Google, then create-or-login the local user and redirect the browser back
+    to the frontend SPA with the JWT token embedded in the URL fragment.
+
+    Frontend reads: window.location.hash → #token=...&user=...
+    """
+    # ── 1. Exchange auth code for access token ───────────────────────────────
+    token_data = {
+        "code": code,
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(GOOGLE_TOKEN_URL, data=token_data)
+
+    if token_resp.status_code != 200:
+        logger.error("Google token exchange failed: %s", token_resp.text)
+        error_redirect = f"{settings.FRONTEND_URL}/#google-error=token_exchange_failed"
+        return RedirectResponse(url=error_redirect)
+
+    token_json = token_resp.json()
+    access_token_google = token_json.get("access_token")
+
+    if not access_token_google:
+        error_redirect = f"{settings.FRONTEND_URL}/#google-error=no_access_token"
+        return RedirectResponse(url=error_redirect)
+
+    # ── 2. Fetch user info from Google ───────────────────────────────────────
+    async with httpx.AsyncClient() as client:
+        userinfo_resp = await client.get(
+            GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token_google}"},
+        )
+
+    if userinfo_resp.status_code != 200:
+        logger.error("Google userinfo fetch failed: %s", userinfo_resp.text)
+        error_redirect = f"{settings.FRONTEND_URL}/#google-error=userinfo_failed"
+        return RedirectResponse(url=error_redirect)
+
+    google_user = userinfo_resp.json()
+    google_id = google_user.get("sub")
+    email = google_user.get("email", "")
+    name = google_user.get("name", email.split("@")[0] if email else "Google User")
+    avatar_url = google_user.get("picture")
+
+    if not email or not google_id:
+        error_redirect = f"{settings.FRONTEND_URL}/#google-error=missing_profile"
+        return RedirectResponse(url=error_redirect)
+
+    # ── 3. Find or create local user ─────────────────────────────────────────
+    user = db.query(User).filter(User.google_id == google_id).first()
+
+    if not user:
+        # Check if a password-based account with same email already exists
+        user = db.query(User).filter(User.email == email).first()
+
+    if user:
+        # Update google_id / avatar if missing / changed
+        changed = False
+        if not user.google_id:
+            user.google_id = google_id
+            changed = True
+        if avatar_url and user.avatar_url != avatar_url:
+            user.avatar_url = avatar_url
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(user)
+    else:
+        # Brand-new user — create with default "seeker" role
+        user = User(
+            email=email,
+            name=name,
+            hashed_password=None,  # OAuth-only account
+            google_id=google_id,
+            avatar_url=avatar_url,
+            role="seeker",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info("Created new Google OAuth user: %s", email)
+
+    if not user.is_active:
+        error_redirect = f"{settings.FRONTEND_URL}/#google-error=account_disabled"
+        return RedirectResponse(url=error_redirect)
+
+    # ── 4. Mint our own JWT and redirect to frontend ──────────────────────────
+    jwt_token = _mint_token(user)
+    user_payload = _user_to_response(user).model_dump()
+    # Serialize user payload as JSON then URL-encode it for the fragment
+    user_json = urllib.parse.quote(json.dumps(user_payload, default=str))
+
+    redirect_url = (
+        f"{settings.FRONTEND_URL}/#google-auth"
+        f"?token={jwt_token}"
+        f"&user={user_json}"
+    )
+    return RedirectResponse(url=redirect_url)

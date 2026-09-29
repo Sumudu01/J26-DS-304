@@ -10,21 +10,25 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)  # nullable for OAuth-only accounts
     name = Column(String(255), nullable=False)
     role = Column(String(50), default="seeker", nullable=False)  # 'seeker', 'recruiter', 'admin'
-    
+
+    # OAuth fields
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    avatar_url = Column(String(512), nullable=True)
+
     # Seeker specific fields
     current_role = Column(String(255), nullable=True)
     target_role = Column(String(255), nullable=True)
     skills = Column(Text, nullable=True)  # JSON-encoded list or comma-separated string
-    
+
     # Recruiter specific fields
     company = Column(String(255), nullable=True)
-    
+
     # Account status
     is_active = Column(Boolean, default=True, nullable=False)
-    
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -50,3 +54,4 @@ class User(Base):
         else:
             clean_list = []
         self.skills = json.dumps(clean_list)
+

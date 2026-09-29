@@ -26,6 +26,7 @@ class UserResponse(BaseModel):
     skills: List[str] = []
     company: Optional[str] = None
     is_active: bool = True
+    avatar_url: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:

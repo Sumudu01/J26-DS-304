@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import LandingPage from './components/LandingPage.jsx'
 import LoginSignup from './components/LoginSignup.jsx'
 import SeekerDashboard from './components/SeekerDashboard.jsx'
@@ -16,10 +16,11 @@ export interface User {
   target_role?: string
   skills?: string
   company?: string
+  avatar_url?: string
   [key: string]: any
 }
 
-export type ViewType = 'landing' | 'login' | 'signup' | 'dashboard'
+export type ViewType = 'landing' | 'login' | 'signup' | 'dashboard' | 'google-callback'
 
 function App() {
   // Initialize user and view from localStorage if available
@@ -42,15 +43,58 @@ function App() {
     }
   })
 
-  const handleLogin = (loggedUser: User) => {
+  // ── Google OAuth callback handler ──────────────────────────────────────────
+  useEffect(() => {
+    const hash = window.location.hash
+
+    // Detect Google OAuth success: #google-auth?token=...&user=...
+    if (hash.startsWith('#google-auth')) {
+      const queryString = hash.replace('#google-auth', '')
+      const params = new URLSearchParams(queryString.startsWith('?') ? queryString.slice(1) : queryString)
+
+      const token = params.get('token')
+      const userRaw = params.get('user')
+
+      if (token && userRaw) {
+        try {
+          const parsedUser: User = JSON.parse(decodeURIComponent(userRaw))
+          // Persist token and user
+          localStorage.setItem('emploeralk_token', token)
+          localStorage.setItem('emploeralk_user', JSON.stringify(parsedUser))
+          // Clear URL fragment
+          window.history.replaceState(null, '', window.location.pathname)
+          setUser(parsedUser)
+          setCurrentView('dashboard')
+        } catch (e) {
+          console.error('Failed to parse Google auth response:', e)
+          window.history.replaceState(null, '', window.location.pathname)
+          setCurrentView('login')
+        }
+      }
+    }
+
+    // Detect Google OAuth error: #google-error=...
+    if (hash.startsWith('#google-error')) {
+      const errorCode = hash.split('=')[1] || 'unknown'
+      console.error('Google OAuth error:', errorCode)
+      window.history.replaceState(null, '', window.location.pathname)
+      setCurrentView('login')
+    }
+  }, [])
+
+  const handleLogin = (loggedUser: User, token?: string) => {
     setUser(loggedUser)
     localStorage.setItem('emploeralk_user', JSON.stringify(loggedUser))
+    if (token) {
+      localStorage.setItem('emploeralk_token', token)
+    }
     setCurrentView('dashboard')
   }
 
   const handleLogout = () => {
     setUser(null)
     localStorage.removeItem('emploeralk_user')
+    localStorage.removeItem('emploeralk_token')
     setCurrentView('landing')
   }
 

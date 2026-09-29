@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:5000,*"
 
+    # Google OAuth2
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:5000/api/auth/google/callback"
+
+    # Frontend URL
+    FRONTEND_URL: str = "http://localhost:5173"
+
     @field_validator("CORS_ORIGINS", mode="after")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
@@ -29,3 +37,4 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
+
