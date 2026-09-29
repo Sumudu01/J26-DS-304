@@ -27,6 +27,10 @@ const SocialButtons = () => {
     window.location.href = `${BACKEND_URL}/api/auth/google/login`
   }
 
+  const handleLinkedInLogin = () => {
+    window.location.href = `${BACKEND_URL}/api/auth/linkedin/login`
+  }
+
   return (
     <>
       {/* Social Divider */}
@@ -39,16 +43,29 @@ const SocialButtons = () => {
         </div>
       </div>
 
-      {/* Google Sign-In Button */}
-      <button
-        type="button"
-        id="google-signin-btn"
-        className="w-full inline-flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100 transition-all duration-150"
-        onClick={handleGoogleLogin}
-      >
-        <GoogleIcon />
-        <span>Continue with Google</span>
-      </button>
+      <div className="grid grid-cols-2 gap-3">
+        {/* Google Sign-In Button */}
+        <button
+          type="button"
+          id="google-signin-btn"
+          className="w-full inline-flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100 transition-all duration-150"
+          onClick={handleGoogleLogin}
+        >
+          <GoogleIcon />
+          <span>Google</span>
+        </button>
+
+        {/* LinkedIn Sign-In Button */}
+        <button
+          type="button"
+          id="linkedin-signin-btn"
+          className="w-full inline-flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100 transition-all duration-150"
+          onClick={handleLinkedInLogin}
+        >
+          <LinkedInIcon />
+          <span>LinkedIn</span>
+        </button>
+      </div>
     </>
   )
 }

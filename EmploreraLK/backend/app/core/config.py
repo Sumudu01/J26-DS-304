@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:5000/api/auth/google/callback"
 
+    # LinkedIn OAuth2
+    LINKEDIN_CLIENT_ID: str = ""
+    LINKEDIN_CLIENT_SECRET: str = ""
+    LINKEDIN_REDIRECT_URI: str = "http://localhost:5000/api/auth/linkedin/callback"
+
     # Frontend URL
     FRONTEND_URL: str = "http://localhost:5173"
 

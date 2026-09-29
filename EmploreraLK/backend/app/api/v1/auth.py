@@ -30,6 +30,12 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 GOOGLE_SCOPE = "openid email profile"
 
+# ─── LinkedIn OAuth2 constants ───────────────────────────────────────────────
+LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
+LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
+LINKEDIN_USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
+LINKEDIN_SCOPE = "openid profile email"
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -285,6 +291,138 @@ async def google_callback(
 
     redirect_url = (
         f"{settings.FRONTEND_URL}/#google-auth"
+        f"?token={jwt_token}"
+        f"&user={user_json}"
+    )
+    return RedirectResponse(url=redirect_url)
+
+
+# ─── LinkedIn OAuth2 routes ───────────────────────────────────────────────────
+
+@router.get("/linkedin/login", summary="Redirect user to LinkedIn OAuth2 consent screen")
+def linkedin_login():
+    """
+    Build the LinkedIn OAuth2 authorization URL and redirect the browser to it.
+    The frontend simply calls window.location.href = '/api/auth/linkedin/login'.
+    """
+    if not settings.LINKEDIN_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LinkedIn OAuth is not configured on this server.",
+        )
+
+    params = {
+        "response_type": "code",
+        "client_id": settings.LINKEDIN_CLIENT_ID,
+        "redirect_uri": settings.LINKEDIN_REDIRECT_URI,
+        "scope": LINKEDIN_SCOPE,
+    }
+    auth_url = f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
+    return RedirectResponse(url=auth_url)
+
+
+@router.get("/linkedin/callback", summary="Handle LinkedIn OAuth2 callback")
+async def linkedin_callback(
+    code: str = Query(..., description="Authorization code from LinkedIn"),
+    db: Session = Depends(get_db),
+):
+    """
+    Exchange the authorization code for tokens, fetch the user profile from
+    LinkedIn, then create-or-login the local user and redirect the browser back
+    to the frontend SPA.
+    """
+    # ── 1. Exchange auth code for access token ───────────────────────────────
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": settings.LINKEDIN_REDIRECT_URI,
+        "client_id": settings.LINKEDIN_CLIENT_ID,
+        "client_secret": settings.LINKEDIN_CLIENT_SECRET,
+    }
+
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(LINKEDIN_TOKEN_URL, data=token_data)
+
+    if token_resp.status_code != 200:
+        logger.error("LinkedIn token exchange failed: %s", token_resp.text)
+        error_redirect = f"{settings.FRONTEND_URL}/#linkedin-error=token_exchange_failed"
+        return RedirectResponse(url=error_redirect)
+
+    token_json = token_resp.json()
+    access_token_linkedin = token_json.get("access_token")
+
+    if not access_token_linkedin:
+        error_redirect = f"{settings.FRONTEND_URL}/#linkedin-error=no_access_token"
+        return RedirectResponse(url=error_redirect)
+
+    # ── 2. Fetch user info from LinkedIn ─────────────────────────────────────
+    async with httpx.AsyncClient() as client:
+        userinfo_resp = await client.get(
+            LINKEDIN_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token_linkedin}"},
+        )
+
+    if userinfo_resp.status_code != 200:
+        logger.error("LinkedIn userinfo fetch failed: %s", userinfo_resp.text)
+        error_redirect = f"{settings.FRONTEND_URL}/#linkedin-error=userinfo_failed"
+        return RedirectResponse(url=error_redirect)
+
+    linkedin_user = userinfo_resp.json()
+    linkedin_id = linkedin_user.get("sub")
+    email = linkedin_user.get("email")
+    name = linkedin_user.get("name", email.split("@")[0] if email else "LinkedIn User")
+    avatar_url = linkedin_user.get("picture")
+
+    if not email or not linkedin_id:
+        error_redirect = f"{settings.FRONTEND_URL}/#linkedin-error=missing_profile"
+        return RedirectResponse(url=error_redirect)
+
+    # ── 3. Find or create local user ─────────────────────────────────────────
+    user = db.query(User).filter(User.linkedin_id == linkedin_id).first()
+
+    if not user:
+        # Check if an account with same email already exists
+        user = db.query(User).filter(User.email == email).first()
+
+    if user:
+        # Update linkedin_id / avatar if missing / changed
+        changed = False
+        if not user.linkedin_id:
+            user.linkedin_id = linkedin_id
+            changed = True
+        if avatar_url and user.avatar_url != avatar_url:
+            user.avatar_url = avatar_url
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(user)
+    else:
+        # Brand-new user
+        user = User(
+            email=email,
+            name=name,
+            hashed_password=None,
+            linkedin_id=linkedin_id,
+            avatar_url=avatar_url,
+            role="seeker",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info("Created new LinkedIn OAuth user: %s", email)
+
+    if not user.is_active:
+        error_redirect = f"{settings.FRONTEND_URL}/#linkedin-error=account_disabled"
+        return RedirectResponse(url=error_redirect)
+
+    # ── 4. Mint our own JWT and redirect to frontend ──────────────────────────
+    jwt_token = _mint_token(user)
+    user_payload = _user_to_response(user).model_dump()
+    user_json = urllib.parse.quote(json.dumps(user_payload, default=str))
+
+    redirect_url = (
+        f"{settings.FRONTEND_URL}/#linkedin-auth"
         f"?token={jwt_token}"
         f"&user={user_json}"
     )

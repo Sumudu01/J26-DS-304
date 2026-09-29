@@ -16,6 +16,7 @@ class User(Base):
 
     # OAuth fields
     google_id = Column(String(255), unique=True, nullable=True, index=True)
+    linkedin_id = Column(String(255), unique=True, nullable=True, index=True)
     avatar_url = Column(String(512), nullable=True)
 
     # Seeker specific fields

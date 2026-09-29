@@ -47,9 +47,10 @@ function App() {
   useEffect(() => {
     const hash = window.location.hash
 
-    // Detect Google OAuth success: #google-auth?token=...&user=...
-    if (hash.startsWith('#google-auth')) {
-      const queryString = hash.replace('#google-auth', '')
+    // Detect Google or LinkedIn OAuth success: #google-auth?token=...&user=... or #linkedin-auth?token=...&user=...
+    if (hash.startsWith('#google-auth') || hash.startsWith('#linkedin-auth')) {
+      const authPrefix = hash.startsWith('#google-auth') ? '#google-auth' : '#linkedin-auth'
+      const queryString = hash.replace(authPrefix, '')
       const params = new URLSearchParams(queryString.startsWith('?') ? queryString.slice(1) : queryString)
 
       const token = params.get('token')
@@ -66,17 +67,18 @@ function App() {
           setUser(parsedUser)
           setCurrentView('dashboard')
         } catch (e) {
-          console.error('Failed to parse Google auth response:', e)
+          console.error(`Failed to parse ${authPrefix.substring(1)} response:`, e)
           window.history.replaceState(null, '', window.location.pathname)
           setCurrentView('login')
         }
       }
     }
 
-    // Detect Google OAuth error: #google-error=...
-    if (hash.startsWith('#google-error')) {
+    // Detect OAuth error: #google-error=... or #linkedin-error=...
+    if (hash.startsWith('#google-error') || hash.startsWith('#linkedin-error')) {
+      const errorPrefix = hash.startsWith('#google-error') ? 'Google' : 'LinkedIn'
       const errorCode = hash.split('=')[1] || 'unknown'
-      console.error('Google OAuth error:', errorCode)
+      console.error(`${errorPrefix} OAuth error:`, errorCode)
       window.history.replaceState(null, '', window.location.pathname)
       setCurrentView('login')
     }
