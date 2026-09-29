@@ -1,7 +1,133 @@
-# Real environment files — never commit
+# ─────────────────────────────────────────────
+# Environment / Secrets
+# ─────────────────────────────────────────────
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 
-# Keep the template
+# Keep the template (so teammates know what vars are needed)
 !.env.example
+
+
+# ─────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+
+# ─────────────────────────────────────────────
+# Virtual Environments
+# ─────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+
+# ─────────────────────────────────────────────
+# Testing & Coverage
+# ─────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+
+# ─────────────────────────────────────────────
+# Type Checking / Linting Caches
+# ─────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+.pyre/
+
+
+# ─────────────────────────────────────────────
+# FastAPI / Uvicorn
+# ─────────────────────────────────────────────
+*.log
+logs/
+
+
+# ─────────────────────────────────────────────
+# Database (if using SQLite locally)
+# ─────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+
+# ─────────────────────────────────────────────
+# Alembic
+# ─────────────────────────────────────────────
+# KEEP alembic/versions/ — migrations must be committed!
+# Only ignore local/temp alembic artifacts:
+alembic/versions/__pycache__/
+
+
+# ─────────────────────────────────────────────
+# IDE / Editor
+# ─────────────────────────────────────────────
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+
+# ─────────────────────────────────────────────
+# OS-Specific
+# ─────────────────────────────────────────────
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+
+# ─────────────────────────────────────────────
+# Jupyter (if you experiment in notebooks)
+# ─────────────────────────────────────────────
+.ipynb_checkpoints/
+
+
+# ─────────────────────────────────────────────
+# Node (if you ever add tooling like Prettier)
+# ─────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
