@@ -75,12 +75,20 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     - Job Seekers: current_role, target_role, skills
     - Recruiters:  company
     """
+    clean_email = payload.email.strip().lower()
+
     # 1. Check if email is already registered
-    existing = db.query(User).filter(User.email == payload.email).first()
+    existing = db.query(User).filter(User.email.ilike(clean_email)).first()
     if existing:
+        if not existing.hashed_password:
+            auth_provider = "Google" if existing.google_id else ("LinkedIn" if existing.linkedin_id else "a social provider")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"An account with this email exists via {auth_provider}. Please sign in using {auth_provider}.",
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
+            detail="Email address is already registered. Please sign in instead.",
         )
 
     # 2. Hash the password
@@ -88,9 +96,9 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 
     # 3. Create User record
     user = User(
-        email=payload.email,
+        email=clean_email,
         hashed_password=hashed_pw,
-        name=payload.name,
+        name=payload.name.strip(),
         role=payload.role if payload.role in ("seeker", "recruiter", "admin") else "seeker",
         current_role=payload.current_role,
         target_role=payload.target_role,
@@ -122,20 +130,29 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     Authenticate an existing user with email and password.
     Returns the user object and a JWT access token.
     """
-    # 1. Look up user by email
-    user = db.query(User).filter(User.email == payload.email).first()
+    clean_email = payload.email.strip().lower()
 
-    # 2. Validate credentials
-    if not user or not user.hashed_password:
+    # 1. Look up user by email (case-insensitive)
+    user = db.query(User).filter(User.email.ilike(clean_email)).first()
+
+    # 2. Validate credentials & account state
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Invalid email or password. If you don't have an account, please sign up first.",
+        )
+
+    if not user.hashed_password:
+        auth_provider = "Google" if user.google_id else ("LinkedIn" if user.linkedin_id else "a social account")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This account was created with {auth_provider}. Please sign in using {auth_provider}.",
         )
 
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Invalid email or password.",
         )
 
     if not user.is_active:
