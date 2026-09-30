@@ -5,7 +5,17 @@ import SeekerDashboard from './components/SeekerDashboard.jsx'
 import RecruiterDashboard from './components/RecruiterDashboard.jsx'
 import AdminDashboard from './components/AdminDashboard.jsx'
 
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:5000'
+const getBackendUrl = (): string => {
+  if (import.meta.env.VITE_BACKEND_URL) {
+    return import.meta.env.VITE_BACKEND_URL.replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return window.location.origin
+  }
+  return 'http://127.0.0.1:5000'
+}
+
+export const BACKEND_URL = getBackendUrl()
 export const API_URL = `${BACKEND_URL}/api`
 
 export interface User {
