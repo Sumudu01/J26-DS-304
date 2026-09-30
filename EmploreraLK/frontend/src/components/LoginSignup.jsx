@@ -1,9 +1,7 @@
 import React, { useState } from 'react'
 import Logo from './Logo.jsx'
-import { API_URL } from '../App'
+import { API_URL, BACKEND_URL } from '../App'
 import { ArrowLeft, Loader2, Eye, EyeOff } from 'lucide-react'
-
-const BACKEND_URL = 'http://127.0.0.1:5000'
 
 // Social login placeholder SVGs
 const GoogleIcon = () => (
