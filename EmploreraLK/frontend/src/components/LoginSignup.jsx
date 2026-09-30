@@ -131,7 +131,11 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
       // Pass both user and token to the parent handler
       onLogin(data.user, data.token)
     } catch (err) {
-      setError(err.message)
+      if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+        setError(`Unable to connect to backend API (${BACKEND_URL}). Please verify your backend server status and VITE_BACKEND_URL setting in Vercel.`)
+      } else {
+        setError(err.message)
+      }
     } finally {
       setLoading(false)
     }
