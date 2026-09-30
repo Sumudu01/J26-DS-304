@@ -1,9 +1,7 @@
 import React, { useState } from 'react'
 import Logo from './Logo.jsx'
-import { API_URL } from '../App'
+import { API_URL, BACKEND_URL } from '../App'
 import { ArrowLeft, Loader2, Eye, EyeOff } from 'lucide-react'
-
-const BACKEND_URL = 'http://127.0.0.1:5000'
 
 // Social login placeholder SVGs
 const GoogleIcon = () => (
@@ -97,17 +95,18 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
     setLoading(true)
 
     try {
+      const cleanEmail = email.trim().toLowerCase()
       const endpoint = isSignup ? `${API_URL}/auth/signup` : `${API_URL}/auth/login`
       const payload = isSignup 
         ? {
-            name,
-            email,
+            name: name.trim(),
+            email: cleanEmail,
             password,
             role,
             ...(role === 'seeker' ? { current_role: currentRole, target_role: targetRole, skills } : {}),
             ...(role === 'recruiter' ? { company } : {})
           }
-        : { email, password }
+        : { email: cleanEmail, password }
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -120,13 +119,23 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Something went wrong. Please check inputs.')
+        let errorMsg = data.error || data.detail
+        if (Array.isArray(errorMsg)) {
+          errorMsg = errorMsg.map(err => err.msg || err).join('; ')
+        } else if (typeof errorMsg === 'object' && errorMsg !== null) {
+          errorMsg = JSON.stringify(errorMsg)
+        }
+        throw new Error(errorMsg || 'Authentication failed. Please check your credentials.')
       }
 
       // Pass both user and token to the parent handler
       onLogin(data.user, data.token)
     } catch (err) {
-      setError(err.message)
+      if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+        setError(`Unable to connect to backend API (${BACKEND_URL}). Please verify your backend server status and VITE_BACKEND_URL setting in Vercel.`)
+      } else {
+        setError(err.message)
+      }
     } finally {
       setLoading(false)
     }
@@ -169,7 +178,7 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
           <div className="bg-white py-8 px-6 shadow sm:rounded-lg border border-gray-200">
             <form className="space-y-5" onSubmit={handleSubmit}>
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm text-center">
+                <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm text-center font-medium">
                   {error}
                 </div>
               )}
