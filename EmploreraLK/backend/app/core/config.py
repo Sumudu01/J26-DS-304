@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import List, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,21 +19,37 @@ class Settings(BaseSettings):
     # Google OAuth2
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = "http://localhost:5000/api/auth/google/callback"
+    GOOGLE_REDIRECT_URI: str = ""
 
     # LinkedIn OAuth2
     LINKEDIN_CLIENT_ID: str = ""
     LINKEDIN_CLIENT_SECRET: str = ""
-    LINKEDIN_REDIRECT_URI: str = "http://localhost:5000/api/auth/linkedin/callback"
+    LINKEDIN_REDIRECT_URI: str = ""
 
     # Frontend URL
-    FRONTEND_URL: str = "http://localhost:5173"
+    FRONTEND_URL: str = ""
 
     @field_validator("CORS_ORIGINS", mode="after")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str):
             return [i.strip() for i in v.split(",") if i.strip()]
+        return v
+
+    @field_validator(
+        "GOOGLE_REDIRECT_URI",
+        "LINKEDIN_REDIRECT_URI",
+        "FRONTEND_URL",
+        mode="after",
+    )
+    @classmethod
+    def no_empty_urls_in_production(cls, v: str, info) -> str:
+        env = os.getenv("ENVIRONMENT", "development")
+        if not v and env != "development":
+            raise ValueError(
+                f"{info.field_name} must be set in production "
+                f"(current ENVIRONMENT={env!r})"
+            )
         return v
 
     model_config = SettingsConfigDict(
