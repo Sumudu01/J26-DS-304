@@ -1,8 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import Logo from './Logo.jsx'
-import { TrendingUp, FileSearch, Milestone, CheckSquare, ShieldCheck, Database, Award } from 'lucide-react'
+import { TrendingUp, FileSearch, Milestone, CheckSquare, ShieldCheck, Database, Award, Menu, X } from 'lucide-react'
 
 function LandingPage({ onNavigate, user, onLogout }) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Navigation Header */}
@@ -19,7 +21,7 @@ function LandingPage({ onNavigate, user, onLogout }) {
               <a href="#statistics" className="hover:text-brand transition-colors">Metrics</a>
             </nav>
 
-            <div className="flex items-center space-x-4">
+            <div className="hidden md:flex items-center space-x-4">
               {user ? (
                 <>
                   <button 
@@ -52,8 +54,62 @@ function LandingPage({ onNavigate, user, onLogout }) {
                 </>
               )}
             </div>
+
+            {/* Mobile Menu Toggle Button */}
+            <div className="md:hidden flex items-center">
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="text-gray-500 hover:text-gray-700 focus:outline-none p-2"
+              >
+                {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Mobile Navigation Menu */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden bg-white border-t border-gray-100">
+            <div className="px-4 pt-2 pb-4 space-y-1 shadow-sm">
+              <a href="#features" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-brand hover:bg-gray-50">Platform Modules</a>
+              <a href="#data-sources" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-brand hover:bg-gray-50">Data Collection</a>
+              <a href="#statistics" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-brand hover:bg-gray-50">Metrics</a>
+              <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col space-y-3 px-3">
+                {user ? (
+                  <>
+                    <button 
+                      onClick={() => onNavigate('dashboard')}
+                      className="w-full text-center px-4 py-2 text-base font-medium bg-brand text-white rounded-md hover:bg-brand-light"
+                    >
+                      Go to Dashboard
+                    </button>
+                    <button 
+                      onClick={onLogout}
+                      className="w-full text-center px-4 py-2 text-base font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Log Out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button 
+                      onClick={() => onNavigate('login')}
+                      className="w-full text-center px-4 py-2 text-base font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Sign In
+                    </button>
+                    <button 
+                      onClick={() => onNavigate('signup')}
+                      className="w-full text-center px-4 py-2 text-base font-medium bg-brand text-white rounded-md hover:bg-brand-light"
+                    >
+                      Get Started
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Hero Section */}
@@ -257,12 +313,12 @@ function LandingPage({ onNavigate, user, onLogout }) {
 
       {/* Footer */}
       <footer className="mt-auto bg-brand-dark text-gray-400 py-8 px-4 border-t border-white/5">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center text-sm">
-          <div className="flex items-center space-x-2">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center text-sm gap-4">
+          <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
             <Logo className="h-6 w-auto" light={true} />
             <span>Contact Team: emploreralk@gmail.com</span>
           </div>
-          <span>© 2026. All rights reserved.</span>
+          <span className="text-center">© 2026. All rights reserved.</span>
           
           <div className="flex space-x-6 mt-4 md:mt-0">
             <a href="#features" className="hover:text-white transition-colors">Features</a>

@@ -5,12 +5,13 @@ import {
   TrendingUp, FileSearch, Milestone, CheckSquare, 
   User, Upload, BookOpen, GraduationCap, Briefcase, 
   MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
-  LogOut, Bell, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle
+  LogOut, Bell, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle, Menu
 } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 
 function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [activeTab, setActiveTab] = useState('demand') // 'demand', 'gap', 'path', 'matching', 'profile'
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   // Notification state
   const [showNotifications, setShowNotifications] = useState(false)
@@ -328,14 +329,24 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   }
 
   return (
-    <div className="flex-1 flex flex-col md:flex-row min-h-screen">
+    <div className="flex-1 flex flex-col md:flex-row min-h-screen relative">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-gray-900/50 z-40 md:hidden" 
+          onClick={() => setIsSidebarOpen(false)} 
+        />
+      )}
 
       {/* ── LEFT SIDEBAR – Vertical Navigation ── */}
-      <aside className="w-full md:w-64 bg-white border-r border-gray-200 flex flex-col shrink-0">
+      <aside className={`w-64 bg-white border-r border-gray-200 flex flex-col shrink-0 fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
 
         {/* Logo */}
-        <div className="px-5 py-5 border-b border-gray-100">
+        <div className="px-5 py-5 border-b border-gray-100 flex justify-between items-center">
           <Logo className="h-8 w-auto" />
+          <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-1 text-gray-500 hover:bg-gray-100 rounded-lg">
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Nav links */}
@@ -416,23 +427,31 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       </aside>
 
       {/* ── MAIN PANEL ── */}
-      <main className="flex-1 flex flex-col bg-gray-50">
+      <main className="flex-1 flex flex-col bg-gray-50 min-w-0">
         {/* Top header bar */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4 shrink-0 flex items-center justify-between relative">
+        <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 shrink-0 flex items-center justify-between relative">
           {/* Left – page title */}
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">
-              {activeTab === 'demand'   && 'Market Forecasts'}
-              {activeTab === 'gap'      && 'Skill Gap Discovery'}
-              {activeTab === 'path'     && 'Career Path Planning'}
-              {activeTab === 'matching' && 'Skill Matching & Jobs'}
-              {activeTab === 'profile'  && 'My Profile'}
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setIsSidebarOpen(true)} 
+              className="md:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 truncate">
+                {activeTab === 'demand'   && 'Market Forecasts'}
+                {activeTab === 'gap'      && 'Skill Gap Discovery'}
+                {activeTab === 'path'     && 'Career Path Planning'}
+                {activeTab === 'matching' && 'Skill Matching & Jobs'}
+                {activeTab === 'profile'  && 'My Profile'}
+              </h1>
+              <p className="hidden sm:block text-xs text-gray-500 mt-0.5">
               {activeTab === 'profile'
                 ? 'Manage your skills, target role, and upload your CV'
                 : 'Diagnose skills, review roadmaps, and match vacancies'}
-            </p>
+              </p>
+            </div>
           </div>
 
           {/* Right – Notification bell & Logout */}
@@ -453,7 +472,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
               {/* Floating notification panel */}
               {showNotifications && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
+                <div className="fixed inset-x-4 top-[72px] sm:absolute sm:inset-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80 bg-white rounded-xl border border-gray-200 shadow-2xl sm:shadow-xl z-[100] sm:z-50 overflow-hidden">
                 {/* Panel header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                   <div className="flex items-center space-x-2">
@@ -540,7 +559,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
           >
             <LogOut className="h-4 w-4 shrink-0" />
-            <span>Logout Session</span>
+            <span>Logout</span>
           </button>
         </div>
       </header>
