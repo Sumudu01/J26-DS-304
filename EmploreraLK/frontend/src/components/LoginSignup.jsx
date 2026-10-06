@@ -146,14 +146,14 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
       {/* Back button */}
       <button 
         onClick={() => onNavigate('landing')}
-        className="absolute top-6 left-6 flex items-center space-x-2 text-sm text-gray-500 hover:text-brand font-medium transition-colors"
+        className="absolute top-4 left-4 sm:top-6 sm:left-6 flex items-center space-x-2 text-sm text-gray-500 hover:text-brand font-medium transition-colors z-10"
       >
         <ArrowLeft className="h-4 w-4" />
-        <span>Back to Home</span>
+        <span className="hidden sm:inline">Back to Home</span>
       </button>
 
       {/* Header */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+      <div className="mt-8 sm:mt-0 sm:mx-auto sm:w-full sm:max-w-md">
         <Logo className={`mx-auto w-auto transition-all ${isSignup ? 'h-8' : 'h-12'}`} />
         <h2 className={`text-center font-extrabold text-gray-900 transition-all ${isSignup ? 'mt-2 text-2xl' : 'mt-6 text-3xl'}`}>
           {isSignup ? 'Create your account' : 'Sign in to your account'}
