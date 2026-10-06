@@ -4,12 +4,13 @@ import { API_URL } from '../App'
 import { 
   Briefcase, Users, BarChart3, Plus, Search, 
   MapPin, DollarSign, Check, X, FileText, UserCheck, AlertTriangle,
-  Database, Cpu, Server, RefreshCw, Shield, LogOut, Bell
+  Database, Cpu, Server, RefreshCw, Shield, LogOut, Bell, Menu
 } from 'lucide-react'
 
 function AdminDashboard({ user, onLogout }) {
   const [metrics, setMetrics] = useState(null)
   const [scrapers, setScrapers] = useState([])
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   
   // UI States
   const [scrapeLoadingId, setScrapeLoadingId] = useState('')
@@ -110,12 +111,23 @@ function AdminDashboard({ user, onLogout }) {
   }
 
   return (
-    <div className="flex-1 flex flex-col md:flex-row min-h-screen">
+    <div className="flex-1 flex flex-col md:flex-row min-h-screen relative">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-gray-900/50 z-40 md:hidden" 
+          onClick={() => setIsSidebarOpen(false)} 
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-white border-r border-gray-200 p-6 flex flex-col justify-between shrink-0">
+      <aside className={`w-64 bg-white border-r border-gray-200 p-6 flex flex-col justify-between shrink-0 fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div>
-          <div className="flex items-center space-x-2 mb-8">
+          <div className="flex items-center justify-between mb-8">
             <Logo className="h-8 w-auto" />
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-1 text-gray-500 hover:bg-gray-100 rounded-lg">
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
           <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 mb-6 text-xs flex items-center space-x-2">
@@ -144,11 +156,19 @@ function AdminDashboard({ user, onLogout }) {
       </aside>
 
       {/* Main Panel */}
-      <main className="flex-1 flex flex-col bg-gray-50">
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Platform Scraper Operations</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Control data sync adapters for LinkedIn, Indeed, TopJobs, Coursera, and Surveys</p>
+      <main className="flex-1 flex flex-col bg-gray-50 min-w-0">
+        <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 flex justify-between items-center shrink-0">
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setIsSidebarOpen(true)} 
+              className="md:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 truncate">Platform Scraper Operations</h1>
+              <p className="hidden sm:block text-xs text-gray-500 mt-0.5">Control data sync adapters for LinkedIn, Indeed, TopJobs, Coursera, and Surveys</p>
+            </div>
           </div>
           {/* Right – Notification bell & Logout */}
           <div className="flex items-center space-x-4">
@@ -168,7 +188,7 @@ function AdminDashboard({ user, onLogout }) {
 
               {/* Floating notification panel */}
               {showNotifications && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
+                <div className="fixed inset-x-4 top-[72px] sm:absolute sm:inset-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80 bg-white rounded-xl border border-gray-200 shadow-2xl sm:shadow-xl z-[100] sm:z-50 overflow-hidden">
                   {/* Panel header */}
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                     <div className="flex items-center space-x-2">
@@ -255,7 +275,7 @@ function AdminDashboard({ user, onLogout }) {
               className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
             >
               <LogOut className="h-4 w-4 shrink-0" />
-              <span>Logout Session</span>
+              <span>Logout</span>
             </button>
           </div>
         </header>
