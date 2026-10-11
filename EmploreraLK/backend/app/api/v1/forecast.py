@@ -110,3 +110,93 @@ def get_collection_stats(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     return ScrapingService.get_collection_statistics(db=db)
+
+
+# ─── NLP Skill Extraction Agent Endpoints ────────────────────────────────────
+
+from app.schemas.nlp_extraction import (
+    NLPExtractionGoal,
+    NLPExtractionRunStatus,
+    TextSkillExtractionRequest,
+    TextSkillExtractionResponse,
+)
+from app.components.forecasting.services.nlp_service import NLPService
+
+
+@router.post(
+    "/nlp/extract",
+    response_model=NLPExtractionRunStatus,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger Autonomous NLP Skill Extraction Agent",
+    description="Deploys the NLP Extraction Agent to parse technical skills, soft skills, seniority, experience, and education from collected job postings."
+)
+def trigger_nlp_extraction(
+    goal: NLPExtractionGoal,
+    db: Session = Depends(get_db)
+) -> NLPExtractionRunStatus:
+    try:
+        return NLPService.trigger_extraction(goal=goal, db=db)
+    except Exception as e:
+        logger.error("Error launching NLP extraction agent: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"NLP extraction agent deployment failed: {str(e)}"
+        )
+
+
+@router.post(
+    "/nlp/extract-text",
+    response_model=TextSkillExtractionResponse,
+    summary="Ad-hoc NLP Skill Extraction from Raw Text",
+    description="Extract skills, seniority level, experience requirements, and education credentials from arbitrary job text or candidate profile."
+)
+def extract_skills_from_text(
+    payload: TextSkillExtractionRequest
+) -> TextSkillExtractionResponse:
+    return NLPService.extract_from_raw_text(text=payload.text, title=payload.title)
+
+
+@router.get(
+    "/nlp/runs",
+    response_model=List[NLPExtractionRunStatus],
+    summary="List NLP Extraction Runs",
+    description="Retrieve the history of autonomous NLP skill extraction runs."
+)
+def list_nlp_runs(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+) -> List[NLPExtractionRunStatus]:
+    return NLPService.get_all_runs(db=db, limit=limit)
+
+
+@router.get(
+    "/nlp/runs/{run_id}",
+    response_model=NLPExtractionRunStatus,
+    summary="Check NLP Extraction Run Status",
+    description="Retrieve status and top skills extracted during a specific agent execution."
+)
+def get_nlp_run_status(
+    run_id: str,
+    db: Session = Depends(get_db)
+) -> NLPExtractionRunStatus:
+    status_info = NLPService.get_run_status(run_id=run_id, db=db)
+    if not status_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"NLP extraction run '{run_id}' not found."
+        )
+    return status_info
+
+
+@router.get(
+    "/nlp/skills/distribution",
+    response_model=Dict[str, Any],
+    summary="Global Extracted Skill Distribution",
+    description="Aggregated frequencies of all skills extracted across collected job postings."
+)
+def get_skill_distribution(
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    return NLPService.get_global_skill_distribution(db=db, limit=limit)
+

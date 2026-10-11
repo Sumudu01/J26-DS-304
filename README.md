@@ -52,19 +52,20 @@ J26-DS-304/
     │   │   │   └── v1/
     │   │   │       ├── auth.py              # JWT Sign up, Login & OAuth2 (Google/LinkedIn)
     │   │   │       ├── profile.py           # Seeker & Recruiter profile endpoints
-    │   │   │       ├── forecast.py          # Data Collection Agent & Forecasting routes
+    │   │   │       ├── forecast.py          # Data Collection, NLP Extraction & Forecasting routes
     │   │   │       ├── career_path.py       # Career pathway endpoints
     │   │   │       ├── skill_gap.py         # Skill gap discovery endpoints
     │   │   │       └── matching.py          # Candidate-to-job matching endpoints
     │   │   ├── components/                  # Domain Business Logic & AI Agents
     │   │   │   ├── forecasting/             # Component 1: Forecasting & Scraping
     │   │   │   │   ├── agents/
-    │   │   │   │   │   ├── data_collection_agent.py   # Autonomous LinkedIn Data Collection Agent
-    │   │   │   │   │   ├── nlp_extraction_agent.py    # NER Skill Extractor & Deduplication
+    │   │   │   │   │   ├── data_collection_agent.py   # Autonomous Multi-Platform Data Collection Agent
+    │   │   │   │   │   ├── nlp_extraction_agent.py    # Autonomous NLP Skill & Metadata Extraction Agent
     │   │   │   │   │   ├── skill_processing_agent.py  # Taxonomy Normalizer
     │   │   │   │   │   └── insight_generation_agent.py # Forecast Explainer
     │   │   │   │   ├── services/
-    │   │   │   │   │   ├── scraping_service.py        # Background task & collection manager
+    │   │   │   │   │   ├── scraping_service.py        # Background collection manager
+    │   │   │   │   │   ├── nlp_service.py             # NLP extraction orchestration & telemetry
     │   │   │   │   │   └── forecasting_service.py     # Time-series model inference service
     │   │   │   │   └── models/
     │   │   │   │       ├── arima_model.py
@@ -80,13 +81,15 @@ J26-DS-304/
     │   │   │   └── security.py              # JWT tokens & Passlib password hashing
     │   │   ├── models/                      # SQLAlchemy Database Entities
     │   │   │   ├── user.py                  # User authentication & profile table
-    │   │   │   └── job_posting.py           # Job postings & Agent collection runs tables
+    │   │   │   └── job_posting.py           # Job postings, Collection runs & NLP runs tables
     │   │   ├── schemas/                     # Pydantic Validation Schemas
     │   │   │   ├── auth.py                  # Auth request & response schemas
-    │   │   │   └── job_posting.py           # Job posting & Agent goal/telemetry schemas
+    │   │   │   ├── job_posting.py           # Job posting & Agent goal/telemetry schemas
+    │   │   │   └── nlp_extraction.py        # NLP Goal, Run Status & Skill Item schemas
     │   │   ├── utils/                       # Common utilities & helpers
     │   │   └── main.py                      # FastAPI application entrypoint & lifespan
     │   ├── run_agent.py                     # Standalone CLI runner for Data Collection Agent
+    │   ├── run_nlp_agent.py                 # Standalone CLI runner for NLP Extraction Agent
     │   ├── requirements.txt                 # Backend Python dependencies
     │   └── .env.example                     # Environment variables template
     ├── frontend/                            # React 18 + Vite + TypeScript Frontend
@@ -222,16 +225,83 @@ When scraping across multiple platforms, employers frequently cross-post the ide
 
 ---
 
+## 🧠 Autonomous NLP Extraction Agent (Component 1)
+
+The **NLP Extraction Agent** ([`nlp_extraction_agent.py`](file:///e:/Sliit/Y4/RP/J26-DS-304/EmploreraLK/backend/app/components/forecasting/agents/nlp_extraction_agent.py)) is an autonomous AI agent engineered to extract, normalize, and categorize technical skills, soft skills, seniority levels, required experience years, and educational credentials from raw job advertisement descriptions.
+
+### 📐 Multi-Engine Extraction Architecture
+
+The agent combines statistical Named Entity Recognition with deterministic taxonomy lookups and heuristic pattern matchers:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                   UNSTRUCTURED JOB ADVERTISEMENT TEXT                  │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  1. spaCy Linguistic Analysis Pipeline                 │
+        │  Tokenization, Lemmatization, Entity Recognition       │
+        │  (en_core_web_sm with resilient regex phrase fallback) │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  2. Curated IT Taxonomy & Contextual Boundary Engine   │
+        │  Evaluates aliases across 8 core categories.           │
+        │  Handles special symbols (C++, C#, .NET, Node.js) via  │
+        │  negative lookbehind/lookahead (?<!\w)alias(?!\w).    │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  3. Metadata & Contextual Feature Extractors           │
+        │  • Seniority Classifier (Intern → Junior → Mid →       │
+        │    Senior → Lead → Manager/Executive)                  │
+        │  • Experience Min-Years Parser (e.g., "3+ years")      │
+        │  • Education Credential Detector (BSc, MSc, PhD, etc.) │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  4. Quality Scoring, Normalization & Persistence       │
+        │  • Updates job_postings (status='extracted', skills)   │
+        │  • Records execution metrics in nlp_extraction_runs    │
+        └────────────────────────────────────────────────────────┘
+```
+
+### 🏷️ 8 Curated Skill Categories & Taxonomies
+1. **Programming Languages:** Python, Java, C++, C#, TypeScript, JavaScript, Go, Rust, PHP, Ruby, Kotlin, Swift, Scala, R, SQL, Dart, Shell.
+2. **Web & Backend Frameworks:** React, Angular, Vue.js, Node.js, Express, Django, FastAPI, Flask, Spring Boot, ASP.NET / .NET Core, Next.js, Laravel.
+3. **Cloud, DevOps & Infrastructure:** AWS, Azure, Google Cloud (GCP), Docker, Kubernetes, Terraform, CI/CD, Linux, Jenkins, Ansible, Helm.
+4. **Databases & Data Storage:** PostgreSQL, MySQL, MongoDB, Redis, Elasticsearch, Oracle, MS SQL Server, Cassandra, DynamoDB, Snowflake.
+5. **AI, Data Science & Machine Learning:** Machine Learning, Deep Learning, NLP, PyTorch, TensorFlow, Computer Vision, Scikit-learn, LLMs, Pandas, Apache Spark.
+6. **Testing, QA & Automation:** Selenium, JUnit, Cypress, Jest, PyTest, Postman, JMeter, Playwright, Cucumber, TestNG.
+7. **Architecture & Engineering Methodologies:** Microservices, REST APIs, GraphQL, Agile / Scrum, CI/CD, Git, TDD, OOP, System Design, DevOps.
+8. **Soft Skills & Professional Attributes:** Communication Skills, Team Collaboration, Leadership, Problem Solving, Analytical Thinking, Time Management.
+
+### 🎯 Seniority, Experience & Education Classification
+- **Seniority Classification:** Extracts explicit and implicit seniority markers (`intern`, `junior`, `mid`, `senior`, `lead`, `manager`) using weighted title and description keyword heuristics.
+- **Experience Years Parser:** Extracts quantitative minimum experience requirements (`3+ years`, `5-7 years`, `at least 2 years` → `3`, `5`, `2`).
+- **Education Level Parser:** Detects educational prerequisites (`Bachelor's Degree`, `Master's Degree`, `PhD / Doctorate`, `Diploma / HND`).
+
+---
+
 ## 📝 API Endpoints Specification
 
-### 1. Autonomous Data Collection & Forecasting (Component 1)
+### 1. Autonomous Data Collection, NLP Extraction & Forecasting (Component 1)
 | Method | Endpoint | Description |
 |:---|:---|:---|
 | `POST` | `/api/forecast/jobs/collect` | Deploy the autonomous agent to collect live jobs (sync or async background) |
-| `GET` | `/api/forecast/agent/runs/{run_id}` | Check status, progress, and telemetry trace of an agent run |
+| `GET` | `/api/forecast/agent/runs/{run_id}` | Check status, progress, and telemetry trace of an agent collection run |
 | `GET` | `/api/forecast/agent/runs` | List recent autonomous agent collection runs |
 | `GET` | `/api/forecast/jobs` | Query collected job postings (keyword, company, location, pagination) |
 | `GET` | `/api/forecast/jobs/stats` | Aggregated data collection statistics & forecasting readiness |
+| `POST` | `/api/forecast/nlp/extract` | Deploy NLP Extraction Agent over collected jobs (batch processing) |
+| `POST` | `/api/forecast/nlp/extract-text` | Ad-hoc extraction of skills, seniority, experience, and education from raw text |
+| `GET` | `/api/forecast/nlp/runs` | List recent autonomous NLP extraction agent runs |
+| `GET` | `/api/forecast/nlp/runs/{run_id}` | Retrieve telemetry and metrics for a specific NLP extraction run |
+| `GET` | `/api/forecast/nlp/skills/distribution` | Retrieve top in-demand skills and category distribution breakdown |
 | `GET` | `/api/v1/forecast/skills` | Retrieve longitudinal demand forecast for specified skills |
 | `GET` | `/api/v1/forecast/emerging` | Identify emerging high-growth technologies |
 | `GET` | `/api/v1/forecast/occupation/{id}` | Forecast aggregate demand for a specific job title |
@@ -287,25 +357,29 @@ When scraping across multiple platforms, employers frequently cross-post the ide
 
 #### 2. `job_postings`
 - `id` (Integer, PK)
-- `job_id` (String 128, Unique, Indexed — e.g. `li_4476810189`)
+- `job_id` (String 128, Unique, Indexed — e.g. `li_4476810189`, `tj_185294`)
 - `title` (String 255, Indexed)
 - `company` (String 255, Indexed)
 - `location` (String 255, Indexed)
 - `job_link` (Text)
 - `posted_date_text` (String 100 — e.g. `2 days ago`)
 - `posted_timestamp` (DateTime UTC with timezone, Indexed)
-- `source` (String 50: `LinkedIn`, `TopJobs`, etc.)
+- `source` (String 50: `LinkedIn`, `TopJobs`)
 - `search_keyword` (String 255, Indexed)
 - `status` (String 50: `collected`, `extracted`, `processed`)
 - `quality_score` (Integer 0-100)
 - `description_raw` (Text, Nullable)
+- `skills_extracted` (Text JSON array of canonical skill names)
+- `seniority_level` (String 50: `intern`, `junior`, `mid`, `senior`, `lead`, `manager`)
+- `experience_years_min` (Integer, Nullable)
+- `education_level` (String 100, Nullable)
 - `raw_metadata` (Text JSON dictionary)
 - `created_at`, `updated_at` (Timestamps with timezone)
 
 #### 3. `data_collection_runs`
 - `id` (Integer, PK)
 - `run_id` (String 64, Unique, Indexed)
-- `source` (String 50: `LinkedIn`)
+- `source` (String 50: `LinkedIn`, `TopJobs`, `Multi-Source`)
 - `target_keywords` (String 255)
 - `target_location` (String 255)
 - `target_count` (Integer)
@@ -313,6 +387,17 @@ When scraping across multiple platforms, employers frequently cross-post the ide
 - `duplicate_count` (Integer)
 - `status` (String 50: `running`, `completed`, `partial`, `rate_limited`, `failed`)
 - `execution_summary` (Text JSON with full telemetry trace)
+- `error_message` (Text, Nullable)
+- `started_at`, `completed_at` (Timestamps with timezone)
+
+#### 4. `nlp_extraction_runs`
+- `id` (Integer, PK)
+- `run_id` (String 64, Unique, Indexed)
+- `total_processed` (Integer)
+- `skills_extracted_count` (Integer)
+- `unique_skills_count` (Integer)
+- `status` (String 50: `running`, `completed`, `partial`, `failed`)
+- `execution_summary` (Text JSON with extraction telemetry trace)
 - `error_message` (Text, Nullable)
 - `started_at`, `completed_at` (Timestamps with timezone)
 
@@ -345,6 +430,9 @@ source .venv/bin/activate
 
 # Install all backend dependencies
 pip install -r requirements.txt
+
+# Download spaCy English NLP model pipeline
+python -m spacy download en_core_web_sm
 
 # Configure environment variables
 cp .env.example .env
@@ -415,10 +503,59 @@ curl -X GET "http://localhost:5000/api/forecast/jobs?keyword=Software&source=Top
 curl -X GET http://localhost:5000/api/forecast/jobs/stats
 ```
 
+---
+
+### 3. Running the Autonomous NLP Extraction Agent
+
+#### Option A: Standalone CLI Runner (`run_nlp_agent.py`)
+Run the autonomous NLP agent directly from the command line over collected database records or ad-hoc texts:
+
+```bash
+# Extract skills from pending unextracted job postings in the database
+python run_nlp_agent.py --batch-size 25
+
+# Force re-extraction across all job postings in the database
+python run_nlp_agent.py --batch-size 50 --force-reextract
+
+# Filter extraction to jobs collected from a specific source (e.g. TopJobs)
+python run_nlp_agent.py --source TopJobs --batch-size 20
+
+# Test ad-hoc extraction on a custom job description string
+python run_nlp_agent.py --test-title "Senior Full-Stack Engineer" \
+  --test-text "We are seeking a Senior Developer with 5+ years of experience in Python, FastAPI, Docker, and AWS. Bachelor's Degree in Computer Science required."
+```
+
+#### Option B: REST API Deployment
+Deploy the NLP agent dynamically via FastAPI endpoints:
+
+```bash
+# 1. Trigger NLP extraction across pending database jobs (batch or background)
+curl -X POST http://localhost:5000/api/forecast/nlp/extract \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch_size": 25,
+    "force_reextract": false,
+    "background": true
+  }'
+
+# 2. Extract skills and metadata from ad-hoc text on demand
+curl -X POST http://localhost:5000/api/forecast/nlp/extract-text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Lead DevOps Architect",
+    "text": "Seeking a Lead Cloud Engineer with 8+ years experience in Kubernetes, Terraform, AWS, CI/CD, and Python. Master degree in Computer Science preferred."
+  }'
+
+# 3. Check status and telemetry of an NLP extraction run
+curl -X GET http://localhost:5000/api/forecast/nlp/runs/{run_id}
+
+# 4. View aggregated skill frequency distribution and categories
+curl -X GET "http://localhost:5000/api/forecast/nlp/skills/distribution?limit=20"
+```
 
 ---
 
-### 3. Frontend Setup
+### 4. Frontend Setup
 
 ```bash
 cd J26-DS-304/EmploreraLK/frontend

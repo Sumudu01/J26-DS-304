@@ -15,6 +15,15 @@ from app.schemas.job_posting import (
     JobListResponse,
 )
 
+from app.schemas.nlp_extraction import (
+    ExtractedSkillItem,
+    JobNLPExtractionResult,
+    NLPExtractionGoal,
+    NLPExtractionRunStatus,
+    TextSkillExtractionRequest,
+    TextSkillExtractionResponse,
+)
+
 __all__ = [
     "SignupRequest",
     "LoginRequest",
@@ -28,5 +37,12 @@ __all__ = [
     "AgentCollectionGoal",
     "AgentRunStatus",
     "JobListResponse",
+    "ExtractedSkillItem",
+    "JobNLPExtractionResult",
+    "NLPExtractionGoal",
+    "NLPExtractionRunStatus",
+    "TextSkillExtractionRequest",
+    "TextSkillExtractionResponse",
 ]
+
 

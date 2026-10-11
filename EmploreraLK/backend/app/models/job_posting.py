@@ -28,6 +28,12 @@ class JobPosting(Base):
     description_raw = Column(Text, nullable=True)
     raw_metadata = Column(Text, nullable=True)  # JSON-serialized metadata dictionary
 
+    # NLP Extracted Attributes
+    skills_extracted = Column(Text, nullable=True)  # JSON-serialized list of unique skills
+    seniority_level = Column(String(50), nullable=True)  # Junior, Mid, Senior, Lead, etc.
+    experience_years_min = Column(Integer, nullable=True)  # Minimum years of experience required
+    education_level = Column(String(100), nullable=True)  # Bachelor's, Master's, etc.
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -43,6 +49,27 @@ class JobPosting(Base):
     def set_metadata(self, data: Dict[str, Any]) -> None:
         """Serialize metadata dictionary to JSON."""
         self.raw_metadata = json.dumps(data)
+
+    def get_skills(self) -> list:
+        """Get parsed list of extracted skills."""
+        if not self.skills_extracted:
+            return []
+        try:
+            parsed = json.loads(self.skills_extracted)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+        return [s.strip() for s in self.skills_extracted.split(",") if s.strip()]
+
+    def set_skills(self, skills_list: list) -> None:
+        """Store unique skills as JSON list."""
+        if isinstance(skills_list, (list, set)):
+            clean = sorted(list({str(s).strip() for s in skills_list if str(s).strip()}))
+            self.skills_extracted = json.dumps(clean)
+        else:
+            self.skills_extracted = json.dumps([])
+
 
 
 class DataCollectionRun(Base):
@@ -76,3 +103,33 @@ class DataCollectionRun(Base):
 
     def set_summary(self, data: Dict[str, Any]) -> None:
         self.execution_summary = json.dumps(data)
+
+
+class NLPExtractionRun(Base):
+    """
+    SQLAlchemy Model tracking autonomous NLP skill extraction runs,
+    telemetry, and performance metrics.
+    """
+    __tablename__ = "nlp_extraction_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(64), unique=True, index=True, nullable=False)
+    total_processed = Column(Integer, default=0)
+    skills_extracted_count = Column(Integer, default=0)
+    status = Column(String(50), default="completed", nullable=False)  # running, completed, failed
+    execution_summary = Column(Text, nullable=True)  # JSON-serialized telemetry
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def get_summary(self) -> Dict[str, Any]:
+        if not self.execution_summary:
+            return {}
+        try:
+            return json.loads(self.execution_summary)
+        except Exception:
+            return {}
+
+    def set_summary(self, data: Dict[str, Any]) -> None:
+        self.execution_summary = json.dumps(data)
+
