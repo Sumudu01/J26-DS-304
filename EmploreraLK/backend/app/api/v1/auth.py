@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password, create_access_token
+from app.models.notification import Notification
 from app.models.user import User
 from app.schemas.auth import (
     SignupRequest,
@@ -111,6 +112,13 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         user.set_skills_list(payload.skills)
 
     db.add(user)
+    db.flush()
+    db.add(Notification(
+        user_id=user.id,
+        type="system",
+        title="Welcome to EmploreraLK",
+        body="Your account is ready. Explore career insights and personalized job matches from your dashboard.",
+    ))
     db.commit()
     db.refresh(user)
 
@@ -292,6 +300,13 @@ async def google_callback(
             is_active=True,
         )
         db.add(user)
+        db.flush()
+        db.add(Notification(
+            user_id=user.id,
+            type="system",
+            title="Welcome to EmploreraLK",
+            body="Your account is ready. Explore career insights and personalized job matches from your dashboard.",
+        ))
         db.commit()
         db.refresh(user)
         logger.info("Created new Google OAuth user: %s", email)
@@ -425,6 +440,13 @@ async def linkedin_callback(
             is_active=True,
         )
         db.add(user)
+        db.flush()
+        db.add(Notification(
+            user_id=user.id,
+            type="system",
+            title="Welcome to EmploreraLK",
+            body="Your account is ready. Explore career insights and personalized job matches from your dashboard.",
+        ))
         db.commit()
         db.refresh(user)
         logger.info("Created new LinkedIn OAuth user: %s", email)
