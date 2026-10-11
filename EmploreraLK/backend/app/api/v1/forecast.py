@@ -333,13 +333,19 @@ def get_skill_co_occurrences(
     ),
 )
 def get_recommended_jobs(
-    target_role: str = Query(..., description="User's target job role (from profile)"),
+    target_role: Optional[str] = Query(None, description="User's target job role (from profile)"),
     skills: Optional[str] = Query(None, description="Comma-separated user skills for overlap scoring"),
+    keyword: Optional[str] = Query(None, description="Free-text job title or skill keyword"),
     source: Optional[str] = Query(None, description="Filter by source platform: LinkedIn or TopJobs"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=50, description="Results per page"),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
+    if not (target_role or (keyword and keyword.strip())):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide target_role or keyword to search job listings.",
+        )
     try:
         user_skills = [s.strip() for s in skills.split(",") if s.strip()] if skills else []
         return ScrapingService.get_recommended_jobs(
@@ -349,6 +355,7 @@ def get_recommended_jobs(
             page=page,
             page_size=page_size,
             source_filter=source,
+            keyword=keyword,
         )
     except Exception as e:
         logger.error("Error fetching recommended jobs: %s", e)

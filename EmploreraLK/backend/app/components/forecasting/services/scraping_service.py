@@ -232,29 +232,47 @@ class ScrapingService:
     def get_recommended_jobs(
         cls,
         db: Session,
-        target_role: str,
+        target_role: Optional[str] = None,
         user_skills: Optional[List[str]] = None,
         page: int = 1,
         page_size: int = 20,
         source_filter: Optional[str] = None,
+        keyword: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Return personalized job postings matched to the user's target_role and skills.
-        Matches by title similarity and extracted skill overlap. Results are ranked by
-        relevance score (skill overlap) then recency.
+        When keyword is provided, search titles, skills, and descriptions for that term
+        instead of restricting to the profile target role.
+        Results are ranked by skill overlap then recency.
         """
-        import json as _json
-
-        # Build base query — match title/keyword/description containing role keywords
-        role_terms = [t.strip() for t in target_role.replace("/", " ").replace(",", " ").split() if len(t.strip()) > 2]
+        search_term = (keyword or "").strip()
+        role_terms = []
+        if not search_term and target_role:
+            role_terms = [
+                t.strip()
+                for t in target_role.replace("/", " ").replace(",", " ").split()
+                if len(t.strip()) > 2
+            ]
         query = db.query(JobPosting)
 
         if source_filter:
             query = query.filter(JobPosting.source.ilike(f"%{source_filter.strip()}%"))
 
-        # Filter by relevance: at least one role keyword matches title OR keywords OR description
-        if role_terms:
-            from sqlalchemy import or_
+        if search_term:
+            tokens = [t for t in search_term.replace("/", " ").replace(",", " ").split() if len(t) > 1] or [search_term]
+            title_conditions = []
+            for term in tokens:
+                term_like = f"%{term}%"
+                title_conditions.extend([
+                    JobPosting.title.ilike(term_like),
+                    JobPosting.search_keyword.ilike(term_like),
+                    JobPosting.description_raw.ilike(term_like),
+                    JobPosting.skills_extracted.ilike(term_like),
+                    JobPosting.company.ilike(term_like),
+                    JobPosting.location.ilike(term_like),
+                ])
+            query = query.filter(or_(*title_conditions))
+        elif role_terms:
             title_conditions = []
             for term in role_terms:
                 term_like = f"%{term}%"
@@ -308,6 +326,7 @@ class ScrapingService:
 
         return {
             "target_role": target_role,
+            "keyword": search_term or None,
             "total_matched": total,
             "page": page,
             "page_size": page_size,
