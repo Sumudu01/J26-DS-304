@@ -6,6 +6,14 @@ from app.schemas.auth import (
     ProfileUpdateRequest,
     ErrorResponse
 )
+from app.schemas.job_posting import (
+    JobPostingBase,
+    JobPostingCreate,
+    JobPostingResponse,
+    AgentCollectionGoal,
+    AgentRunStatus,
+    JobListResponse,
+)
 
 __all__ = [
     "SignupRequest",
@@ -13,5 +21,12 @@ __all__ = [
     "UserResponse",
     "AuthResponse",
     "ProfileUpdateRequest",
-    "ErrorResponse"
+    "ErrorResponse",
+    "JobPostingBase",
+    "JobPostingCreate",
+    "JobPostingResponse",
+    "AgentCollectionGoal",
+    "AgentRunStatus",
+    "JobListResponse",
 ]
+
