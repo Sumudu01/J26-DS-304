@@ -95,6 +95,16 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   // Salary Insights state
   const [salaryData, setSalaryData] = useState(null)
 
+  // Live Job Listings state (Market Forecasts tab)
+  const [liveJobs, setLiveJobs] = useState([])
+  const [liveJobsTotal, setLiveJobsTotal] = useState(0)
+  const [liveJobsPage, setLiveJobsPage] = useState(1)
+  const [liveJobsLoading, setLiveJobsLoading] = useState(false)
+  const [liveJobsError, setLiveJobsError] = useState('')
+  const [liveJobsSource, setLiveJobsSource] = useState('') // '', 'LinkedIn', 'TopJobs'
+  const [pipelineStatus, setPipelineStatus] = useState(null) // null | 'running' | 'done'
+  const [pipelineTriggerLoading, setPipelineTriggerLoading] = useState(false)
+
   const graphContainerRef = useRef(null)
   const [graphWidth, setGraphWidth] = useState(800)
 
@@ -118,6 +128,13 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     fetchMatchingJobs()
     fetchSalaryInsights()
   }, [user]) // Re-run whenever user profile changes (skills, target_role)
+
+  // Fetch live jobs when demand tab is active
+  useEffect(() => {
+    if (activeTab === 'demand') {
+      fetchLiveJobs(1, '')
+    }
+  }, [activeTab, user.target_role])
 
   const fetchDemandForecast = async () => {
     try {
@@ -207,6 +224,63 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       console.error("Error loading catalog courses", e)
     } finally {
       setIsSearchingCourses(false)
+    }
+  }
+
+  // Fetch live job postings from the agentic pipeline backend
+  const fetchLiveJobs = async (page = 1, source = liveJobsSource) => {
+    if (!user.target_role) return
+    setLiveJobsLoading(true)
+    setLiveJobsError('')
+    try {
+      const skillsParam = Array.isArray(user.skills) ? user.skills.join(',') : (user.skills || '')
+      const params = new URLSearchParams({
+        target_role: user.target_role,
+        skills: skillsParam,
+        page: String(page),
+        page_size: '15',
+        ...(source ? { source } : {}),
+      })
+      const res = await fetch(`${API_URL}/forecast/jobs/recommended?${params.toString()}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setLiveJobs(data.items || [])
+      setLiveJobsTotal(data.total_matched || 0)
+      setLiveJobsPage(page)
+    } catch (e) {
+      console.error('Error loading live jobs', e)
+      setLiveJobsError('Could not load live job listings. The pipeline may still be collecting data.')
+    } finally {
+      setLiveJobsLoading(false)
+    }
+  }
+
+  // Trigger the full 4-agent pipeline for the user's target role
+  const triggerPipeline = async () => {
+    if (!user.target_role || pipelineTriggerLoading) return
+    setPipelineTriggerLoading(true)
+    setPipelineStatus('running')
+    try {
+      const params = new URLSearchParams({
+        target_role: user.target_role,
+        location: 'Sri Lanka',
+        max_jobs: '25',  // Fast first batch; user can re-run for more
+      })
+      const res = await fetch(`${API_URL}/forecast/pipeline/run?${params.toString()}`, { method: 'POST' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setPipelineStatus('triggered')
+      // Poll for new listings every 10s up to 3 times (stops when data arrives)
+      let pollCount = 0
+      const poll = setInterval(async () => {
+        pollCount++
+        await fetchLiveJobs(1, liveJobsSource)
+        if (pollCount >= 3) clearInterval(poll)
+      }, 10000)
+    } catch (e) {
+      console.error('Pipeline trigger error', e)
+      setPipelineStatus('error')
+    } finally {
+      setPipelineTriggerLoading(false)
     }
   }
 
@@ -979,6 +1053,257 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold">-25% demand drop</span>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* ── LIVE JOB LISTINGS FROM AGENTIC PIPELINE ── */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                {/* Section header */}
+                <div className="px-6 py-4 bg-gradient-to-r from-brand/5 to-indigo-50/60 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-brand/10 rounded-lg">
+                      <Briefcase className="h-4 w-4 text-brand" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                        Live Job Listings
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-full animate-pulse">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                          Real-Time
+                        </span>
+                      </h2>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Personalized for <span className="font-semibold text-brand">{user.target_role || 'your target role'}</span> — sourced from LinkedIn &amp; TopJobs via AI pipeline
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Controls row */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Source filter */}
+                    <select
+                      value={liveJobsSource}
+                      onChange={(e) => { setLiveJobsSource(e.target.value); fetchLiveJobs(1, e.target.value) }}
+                      className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:ring-2 focus:ring-brand/20 outline-none"
+                    >
+                      <option value="">All Sources</option>
+                      <option value="LinkedIn">LinkedIn</option>
+                      <option value="TopJobs">TopJobs</option>
+                    </select>
+
+                    {/* Refresh button */}
+                    <button
+                      onClick={() => fetchLiveJobs(1, liveJobsSource)}
+                      disabled={liveJobsLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand border border-brand/20 bg-brand/5 rounded-lg hover:bg-brand/10 transition-all disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${liveJobsLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+
+                    {/* Pipeline trigger button */}
+                    <button
+                      onClick={triggerPipeline}
+                      disabled={pipelineTriggerLoading || pipelineStatus === 'triggered'}
+                      title="Run full 4-agent pipeline to collect & process fresh job data"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                        pipelineStatus === 'triggered'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-brand text-white hover:bg-brand-dark shadow-sm'
+                      } disabled:opacity-60`}
+                    >
+                      <Zap className="h-3.5 w-3.5" />
+                      {pipelineStatus === 'triggered' ? 'Pipeline Running…' : 'Run AI Pipeline'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pipeline status banner */}
+                {pipelineStatus === 'triggered' && (
+                  <div className="mx-6 mt-4 px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3 text-xs text-blue-700">
+                    <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
+                    <div>
+                      <p className="font-bold">Autonomous Pipeline Running</p>
+                      <p className="text-blue-600 mt-0.5">Data Collection Agent → NLP Extraction Agent → Skill Processing Agent are operating in background. New listings will appear within ~30 seconds.</p>
+                    </div>
+                  </div>
+                )}
+                {pipelineStatus === 'error' && (
+                  <div className="mx-6 mt-4 px-4 py-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-600">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    Pipeline trigger failed. Please ensure the backend is running and try again.
+                  </div>
+                )}
+
+                {/* Body */}
+                <div className="p-6">
+                  {liveJobsLoading && liveJobs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-gray-400 space-y-3">
+                      <RefreshCw className="h-8 w-8 animate-spin text-brand/40" />
+                      <p className="text-sm font-medium">Fetching live job listings…</p>
+                    </div>
+                  ) : liveJobsError ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                      <div className="p-3 bg-amber-50 rounded-full">
+                        <AlertTriangle className="h-6 w-6 text-amber-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">No live listings yet</p>
+                        <p className="text-xs text-gray-400 mt-1">{liveJobsError}</p>
+                      </div>
+                      <button
+                        onClick={triggerPipeline}
+                        className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm"
+                      >
+                        <Zap className="h-4 w-4" />
+                        Start Data Collection Pipeline
+                      </button>
+                    </div>
+                  ) : liveJobs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                      <div className="p-3 bg-gray-50 rounded-full">
+                        <Briefcase className="h-6 w-6 text-gray-300" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">No job listings collected yet</p>
+                        <p className="text-xs text-gray-400 mt-1">Trigger the AI pipeline to collect live job posts from LinkedIn &amp; TopJobs for your target role.</p>
+                      </div>
+                      <button
+                        onClick={triggerPipeline}
+                        disabled={pipelineTriggerLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-60"
+                      >
+                        <Zap className="h-4 w-4" />
+                        {pipelineTriggerLoading ? 'Starting…' : 'Run AI Pipeline Now'}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Stats row */}
+                      <div className="flex items-center justify-between mb-4">
+                        <p className="text-xs text-gray-500">
+                          <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found for <span className="font-semibold text-brand">{user.target_role}</span>
+                          {liveJobsSource && <span className="ml-1 text-gray-400">from {liveJobsSource}</span>}
+                        </p>
+                        <span className="text-[10px] text-gray-400">Ranked by skill match</span>
+                      </div>
+
+                      {/* Job cards */}
+                      <div className="space-y-3">
+                        {liveJobs.map((job, idx) => (
+                          <div
+                            key={job.job_id || idx}
+                            className="group relative flex flex-col sm:flex-row sm:items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-brand/25 hover:shadow-md bg-white transition-all duration-200"
+                          >
+                            {/* Skill match badge */}
+                            {job.skill_match_count > 0 && (
+                              <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">
+                                <CheckCircle2 className="h-3 w-3" />
+                                {job.skill_match_count} skills matched
+                              </div>
+                            )}
+
+                            {/* Company initials avatar */}
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand/20 to-indigo-100 flex items-center justify-center text-sm font-extrabold text-brand shrink-0">
+                              {(job.company || 'Co').charAt(0).toUpperCase()}
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2 pr-20">
+                                <div>
+                                  <h4 className="text-sm font-bold text-gray-900 group-hover:text-brand transition-colors leading-tight">
+                                    {job.title}
+                                  </h4>
+                                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                    <span className="font-medium text-gray-700">{job.company}</span>
+                                    <span className="flex items-center gap-0.5">
+                                      <MapPin className="h-3 w-3" />
+                                      {job.location}
+                                    </span>
+                                    {job.seniority_level && (
+                                      <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-semibold">
+                                        {job.seniority_level}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Description snippet */}
+                              {job.description_snippet && (
+                                <p className="mt-2 text-xs text-gray-500 leading-relaxed line-clamp-2">
+                                  {job.description_snippet}
+                                </p>
+                              )}
+
+                              {/* Skill overlap badges */}
+                              {job.skill_overlap && job.skill_overlap.length > 0 && (
+                                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                  {job.skill_overlap.slice(0, 6).map((sk, si) => (
+                                    <span key={si} className="px-2 py-0.5 bg-brand/8 text-brand text-[10px] font-semibold rounded-full border border-brand/15">
+                                      ✓ {sk}
+                                    </span>
+                                  ))}
+                                  {job.skill_overlap.length > 6 && (
+                                    <span className="text-[10px] text-gray-400">+{job.skill_overlap.length - 6} more</span>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Footer row */}
+                              <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  {/* Source badge */}
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    job.source === 'LinkedIn'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-orange-100 text-orange-700'
+                                  }`}>
+                                    {job.source}
+                                  </span>
+                                  {job.posted_date_text && (
+                                    <span className="text-[10px] text-gray-400">{job.posted_date_text}</span>
+                                  )}
+                                </div>
+                                <a
+                                  href={job.job_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-xs font-semibold text-brand hover:text-brand-dark transition-colors"
+                                >
+                                  View Job <ExternalLink className="h-3 w-3" />
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Pagination */}
+                      {liveJobsTotal > 15 && (
+                        <div className="mt-5 flex items-center justify-center gap-3">
+                          <button
+                            onClick={() => fetchLiveJobs(liveJobsPage - 1, liveJobsSource)}
+                            disabled={liveJobsPage <= 1 || liveJobsLoading}
+                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-all"
+                          >
+                            ← Previous
+                          </button>
+                          <span className="text-xs text-gray-500">
+                            Page {liveJobsPage} · {Math.ceil(liveJobsTotal / 15)} total
+                          </span>
+                          <button
+                            onClick={() => fetchLiveJobs(liveJobsPage + 1, liveJobsSource)}
+                            disabled={liveJobsPage * 15 >= liveJobsTotal || liveJobsLoading}
+                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-all"
+                          >
+                            Next →
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </div>

@@ -320,3 +320,74 @@ def get_skill_co_occurrences(
     )
 
 
+# ─── Personalized Recommended Jobs Endpoint ──────────────────────────────────
+
+@router.get(
+    "/jobs/recommended",
+    response_model=Dict[str, Any],
+    summary="Personalized Job Listings for User's Target Role",
+    description=(
+        "Returns real-time job postings from the database matched to the user's target role "
+        "and skill profile. Jobs are scored by skill-overlap and sorted by relevance then recency. "
+        "Sourced from LinkedIn & TopJobs via the autonomous 4-agent pipeline."
+    ),
+)
+def get_recommended_jobs(
+    target_role: str = Query(..., description="User's target job role (from profile)"),
+    skills: Optional[str] = Query(None, description="Comma-separated user skills for overlap scoring"),
+    source: Optional[str] = Query(None, description="Filter by source platform: LinkedIn or TopJobs"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=50, description="Results per page"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    try:
+        user_skills = [s.strip() for s in skills.split(",") if s.strip()] if skills else []
+        return ScrapingService.get_recommended_jobs(
+            db=db,
+            target_role=target_role,
+            user_skills=user_skills,
+            page=page,
+            page_size=page_size,
+            source_filter=source,
+        )
+    except Exception as e:
+        logger.error("Error fetching recommended jobs: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch recommended jobs: {str(e)}"
+        )
+
+
+# ─── Full Agentic Pipeline Trigger ───────────────────────────────────────────
+
+@router.post(
+    "/pipeline/run",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger Full 4-Agent Pipeline for a Target Role",
+    description=(
+        "Orchestrates the complete autonomous pipeline: "
+        "Data Collection Agent → NLP Extraction Agent → Skill Processing Agent → "
+        "persists structured, normalized job postings ready for personalized display. "
+        "Runs entirely in background. Returns a pipeline_id with per-stage status."
+    ),
+)
+def trigger_full_pipeline(
+    target_role: str = Query(..., description="Target role to collect and process jobs for"),
+    location: str = Query("Sri Lanka", description="Geographic scope for job collection"),
+    max_jobs: int = Query(25, ge=5, le=200, description="Max jobs to collect per platform (25 is fast, 50+ is thorough)"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    try:
+        return ScrapingService.trigger_full_pipeline(
+            target_role=target_role,
+            location=location,
+            max_jobs=max_jobs,
+            db=db,
+        )
+    except Exception as e:
+        logger.error("Error triggering full pipeline: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Pipeline trigger failed: {str(e)}"
+        )
