@@ -1,57 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
+import NotificationCenter from './NotificationCenter.jsx'
+import DemandInsightsPanel from './DemandInsightsPanel.jsx'
+import { createNotification } from './notificationsApi.js'
 import { API_URL } from '../App'
 import { 
   TrendingUp, FileSearch, Milestone, CheckSquare, 
   User, Upload, BookOpen, GraduationCap, Briefcase, 
   MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
-  LogOut, Bell, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle, Menu, ChevronLeft
+  LogOut, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle, Menu, ChevronLeft
 } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 
 function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [activeTab, setActiveTab] = useState('demand') // 'demand', 'gap', 'path', 'matching', 'profile'
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-
-  // Notification state
-  const [showNotifications, setShowNotifications] = useState(false)
-  const notifRef = useRef(null)
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'match',   read: false, title: 'New Job Match!',           body: 'A new AI Engineer role at WSO2 matches your profile (92% score).', time: '2m ago' },
-    { id: 2, type: 'gap',     read: false, title: 'Skill Gap Alert',           body: 'You are missing TensorFlow — a top skill for your target role.', time: '1h ago' },
-    { id: 3, type: 'market',  read: false, title: 'Market Trend Update',       body: 'Generative AI demand index rose 14% this week on LinkedIn.', time: '3h ago' },
-    { id: 4, type: 'career',  read: true,  title: 'Career Path Milestone',     body: 'Complete 2 more Python projects to reach Senior ML Engineer level.', time: 'Yesterday' },
-    { id: 5, type: 'match',   read: true,  title: 'Application Viewed',        body: 'Your Easy Apply application to Dialog was viewed by the recruiter.', time: '2d ago' },
-  ])
-
-  const unreadCount = notifications.filter(n => !n.read).length
-
-  // Close notification panel when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (notifRef.current && !notifRef.current.contains(e.target)) {
-        setShowNotifications(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })))
-  const dismissNotif = (id) => setNotifications(prev => prev.filter(n => n.id !== id))
-
-  const notifIconColor = {
-    match:  'bg-emerald-100 text-emerald-600',
-    gap:    'bg-amber-100 text-amber-600',
-    market: 'bg-blue-100 text-blue-600',
-    career: 'bg-purple-100 text-purple-600',
-  }
-  const notifIcon = {
-    match:  <CheckCircle2 className="h-4 w-4" />,
-    gap:    <FileSearch className="h-4 w-4" />,
-    market: <TrendingUp className="h-4 w-4" />,
-    career: <Milestone className="h-4 w-4" />,
-  }
 
   // Profile update state
   const [editSkills, setEditSkills] = useState(user.skills.join(', '))
@@ -65,8 +28,11 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [cvSuccessMsg, setCvSuccessMsg] = useState('')
 
   // API response states
-  const [demandData, setDemandData] = useState([])
+  const [demandData] = useState([])
   const [forecastHorizon, setForecastHorizon] = useState('2029') // 2027, 2028, 2029
+  const [demandInsights, setDemandInsights] = useState(null)
+  const [demandInsightsLoading, setDemandInsightsLoading] = useState(false)
+  const [demandInsightsError, setDemandInsightsError] = useState('')
 
   // Search demand state
   const [searchQuery, setSearchQuery] = useState('')
@@ -123,7 +89,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   // Load initial data
   useEffect(() => {
-    fetchDemandForecast()
     fetchGapAnalysis()
     fetchCareerPath()
     fetchMatchingJobs()
@@ -138,14 +103,26 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   }, [activeTab, user.target_role])
 
   const fetchDemandForecast = async () => {
+    setDemandInsightsLoading(true)
+    setDemandInsightsError('')
+    setDemandInsights(null)
     try {
-      const res = await fetch(`${API_URL}/demand-forecast`)
-      const data = await res.json()
-      setDemandData(data)
+      const res = await fetch(`${API_URL}/forecast/demand-insights?target_year=${forecastHorizon}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setDemandInsights(await res.json())
     } catch (e) {
-      console.error("Error loading demand forecasts", e)
+      console.error('Error loading future demand insights', e)
+      setDemandInsightsError(e.message || 'Could not load demand insights.')
+    } finally {
+      setDemandInsightsLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (activeTab === 'demand' && demandSubView === 'forecast') {
+      fetchDemandForecast()
+    }
+  }, [activeTab, demandSubView, forecastHorizon])
 
   const fetchGapAnalysis = async (targetRole = user.target_role) => {
     setIsSearchingGap(true)
@@ -275,6 +252,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       const res = await fetch(`${API_URL}/forecast/pipeline/run?${params.toString()}`, { method: 'POST' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setPipelineStatus('triggered')
+      try {
+        await createNotification({
+          type: 'pipeline',
+          title: 'Job search started',
+          body: `The job collection pipeline is searching for ${user.target_role} roles in Sri Lanka.`,
+        })
+      } catch (notificationError) {
+        console.error('Could not save job search notification', notificationError)
+      }
       // Poll for new listings every 10s up to 3 times (stops when data arrives)
       let pollCount = 0
       const poll = setInterval(async () => {
@@ -611,104 +597,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           {/* Right – Notification bell & Logout */}
           <div className="flex items-center space-x-2 sm:space-x-4 shrink-0">
-            <div className="relative" ref={notifRef}>
-              <button
-                onClick={() => setShowNotifications(prev => !prev)}
-                className="relative p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus:outline-none"
-                aria-label="Notifications"
-              >
-                <Bell className="h-5 w-5" />
-                {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 h-4 w-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-
-              {/* Floating notification panel */}
-              {showNotifications && (
-                <div className="fixed inset-x-4 top-[72px] sm:absolute sm:inset-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80 bg-white rounded-xl border border-gray-200 shadow-2xl sm:shadow-xl z-[100] sm:z-50 overflow-hidden">
-                {/* Panel header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                  <div className="flex items-center space-x-2">
-                    <Bell className="h-4 w-4 text-gray-700" />
-                    <span className="text-sm font-bold text-gray-900">Notifications</span>
-                    {unreadCount > 0 && (
-                      <span className="px-1.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded-full">
-                        {unreadCount} new
-                      </span>
-                    )}
-                  </div>
-                  {unreadCount > 0 && (
-                    <button
-                      onClick={markAllRead}
-                      className="text-[11px] text-brand font-semibold hover:underline"
-                    >
-                      Mark all read
-                    </button>
-                  )}
-                </div>
-
-                {/* Notification list */}
-                <ul className="max-h-80 overflow-y-auto divide-y divide-gray-50">
-                  {notifications.length === 0 && (
-                    <li className="px-4 py-8 text-center text-sm text-gray-400">
-                      You're all caught up! 🎉
-                    </li>
-                  )}
-                  {notifications.map(n => (
-                    <li
-                      key={n.id}
-                      className={`flex items-start gap-3 px-4 py-3 group transition-colors ${
-                        n.read ? 'bg-white' : 'bg-blue-50/40'
-                      }`}
-                    >
-                      {/* Icon */}
-                      <div className={`mt-0.5 p-1.5 rounded-full shrink-0 ${notifIconColor[n.type]}`}>
-                        {notifIcon[n.type]}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <p className={`text-xs font-semibold truncate ${n.read ? 'text-gray-700' : 'text-gray-900'}`}>
-                            {n.title}
-                            {!n.read && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-blue-500 align-middle" />}
-                          </p>
-                          <span className="text-[10px] text-gray-400 shrink-0">{n.time}</span>
-                        </div>
-                        <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed line-clamp-2">
-                          {n.body}
-                        </p>
-                      </div>
-
-                      {/* Dismiss */}
-                      <button
-                        onClick={() => dismissNotif(n.id)}
-                        className="opacity-0 group-hover:opacity-100 mt-0.5 text-gray-300 hover:text-gray-500 transition-opacity shrink-0"
-                        aria-label="Dismiss"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-
-                {/* Panel footer */}
-                {notifications.length > 0 && (
-                  <div className="px-4 py-2.5 border-t border-gray-100 text-center">
-                    <button
-                      onClick={() => setNotifications([])}
-                      className="text-[11px] text-gray-400 hover:text-gray-600 font-medium transition-colors"
-                    >
-                      Clear all notifications
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
+            <NotificationCenter />
           <button
             onClick={onLogout}
             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
@@ -1327,145 +1216,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                   </div>
                 </div>
 
-                {/* SVG Forecasting line chart */}
-                {demandData.length > 0 ? (
-                  <div className="overflow-x-auto -mx-1 px-1 pb-1">
-                    <div className="relative min-w-[560px] sm:min-w-0">
-                    <div className="h-56 sm:h-64 w-full flex items-end justify-between border-b border-l border-gray-300 pb-2 pl-4">
-                      {/* Vertical axis legend */}
-                      <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-[10px] text-gray-400 -ml-1 select-none">
-                        <span>150</span>
-                        <span>100</span>
-                        <span>50</span>
-                        <span>0</span>
-                      </div>
-                      
-                      {/* Render line bars based on selected forecast years */}
-                      {demandData.filter(d => d.year <= parseInt(forecastHorizon)).map((d, index) => {
-                        return (
-                          <div key={index} className="flex flex-col items-center flex-1 min-w-[64px] group">
-                            {/* Demand bar graphics */}
-                            <div className="flex items-end gap-0.5 sm:gap-1 md:gap-1.5 w-full justify-center h-40 sm:h-48 mb-2">
-                              {/* Generative AI (Blue) */}
-                              <div 
-                                style={{ height: `${(d["Generative AI"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-blue-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Generative AI: ${d["Generative AI"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-blue-700 opacity-0 group-hover:opacity-100">{d["Generative AI"]}</span>
-                              </div>
-                              {/* Python (Indigo) */}
-                              <div 
-                                style={{ height: `${(d["Python"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-indigo-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Python: ${d["Python"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-indigo-700 opacity-0 group-hover:opacity-100">{d["Python"]}</span>
-                              </div>
-                              {/* Cloud (Emerald) */}
-                              <div 
-                                style={{ height: `${(d["Cloud Computing"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-emerald-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Cloud Computing: ${d["Cloud Computing"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-emerald-700 opacity-0 group-hover:opacity-100">{d["Cloud Computing"]}</span>
-                              </div>
-                              {/* Traditional Web (Yellow) */}
-                              <div 
-                                style={{ height: `${(d["Traditional Web"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-yellow-500 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Traditional Web: ${d["Traditional Web"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-yellow-600 opacity-0 group-hover:opacity-100">{d["Traditional Web"]}</span>
-                              </div>
-                              {/* Legacy (Red) */}
-                              <div 
-                                style={{ height: `${(d["COBOL/Legacy"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-red-400 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`COBOL/Legacy: ${d["COBOL/Legacy"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-red-600 opacity-0 group-hover:opacity-100">{d["COBOL/Legacy"]}</span>
-                              </div>
-                            </div>
-                            <span className="text-[10px] sm:text-xs font-bold text-gray-700">{d.year}</span>
-                            {d.year > 2026 && <span className="text-[8px] sm:text-[9px] text-blue-600 font-semibold uppercase">Forecast</span>}
-                          </div>
-                        )
-                      })}
-                    </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="h-56 sm:h-64 flex items-center justify-center text-sm text-gray-500">Querying forecasts...</div>
-                )}
-
-                {/* Legend */}
-                <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-2 sm:gap-6 mt-5 sm:mt-6 border-t border-gray-100 pt-4 text-[11px] sm:text-xs font-medium text-gray-600">
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-blue-600"></span>
-                    <span>Generative AI (NLP/LLMs)</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-indigo-600"></span>
-                    <span>Python Programming</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-emerald-600"></span>
-                    <span>Cloud Computing (AWS/Docker)</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-yellow-500"></span>
-                    <span>Traditional Web</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-red-400"></span>
-                    <span>COBOL / Legacy</span>
-                  </div>
-                </div>
               </div>
-
-              {/* Emerging trends card list */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold mb-3 flex items-center text-emerald-700">
-                    📈 Rapidly Emerging Skills
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">Generative AI Models (RAG, Agents)</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+59% forecasted</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">Prompt Engineering Patterns</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+35% forecasted</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">AWS Cloud Engineering & Kubernetes</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+20% forecasted</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold mb-3 flex items-center text-red-700">
-                    📉 Gradually Declining Skills
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">COBOL / Mainframe Logic</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-83% demand drop</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">On-Prem Server Management</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-40% demand drop</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">Static jQuery Frontend Templates</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-25% demand drop</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <DemandInsightsPanel
+                insights={demandInsights}
+                isLoading={demandInsightsLoading}
+                error={demandInsightsError}
+                onRetry={fetchDemandForecast}
+                onCollect={triggerPipeline}
+                canCollect={Boolean(user.target_role)}
+              />
               </>
               )}
 
@@ -2309,4 +2068,3 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 }
 
 export default SeekerDashboard
-
