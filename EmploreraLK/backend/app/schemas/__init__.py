@@ -15,6 +15,27 @@ from app.schemas.job_posting import (
     JobListResponse,
 )
 
+from app.schemas.nlp_extraction import (
+    ExtractedSkillItem,
+    JobNLPExtractionResult,
+    NLPExtractionGoal,
+    NLPExtractionRunStatus,
+    TextSkillExtractionRequest,
+    TextSkillExtractionResponse,
+)
+
+from app.schemas.skill_processing import (
+    NormalizedSkillItem,
+    JobSkillProcessingResult,
+    SkillProcessingGoal,
+    SkillProcessingRunStatus,
+    AdHocSkillNormalizationRequest,
+    AdHocSkillNormalizationResponse,
+    SkillCoOccurrenceItem,
+    SkillCoOccurrenceResponse,
+    TaxonomyTreeResponse,
+)
+
 __all__ = [
     "SignupRequest",
     "LoginRequest",
@@ -28,5 +49,21 @@ __all__ = [
     "AgentCollectionGoal",
     "AgentRunStatus",
     "JobListResponse",
+    "ExtractedSkillItem",
+    "JobNLPExtractionResult",
+    "NLPExtractionGoal",
+    "NLPExtractionRunStatus",
+    "TextSkillExtractionRequest",
+    "TextSkillExtractionResponse",
+    "NormalizedSkillItem",
+    "JobSkillProcessingResult",
+    "SkillProcessingGoal",
+    "SkillProcessingRunStatus",
+    "AdHocSkillNormalizationRequest",
+    "AdHocSkillNormalizationResponse",
+    "SkillCoOccurrenceItem",
+    "SkillCoOccurrenceResponse",
+    "TaxonomyTreeResponse",
 ]
+
 
