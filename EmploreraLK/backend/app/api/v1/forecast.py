@@ -80,9 +80,10 @@ def list_agent_runs(
     description="Search and filter collected job postings with pagination."
 )
 def list_collected_jobs(
-    keyword: Optional[str] = Query(None, description="Search keyword in title or tag"),
+    keyword: Optional[str] = Query(None, description="Search keyword in title, tag, or description"),
     location: Optional[str] = Query(None, description="Filter by location"),
     company: Optional[str] = Query(None, description="Filter by company name"),
+    source: Optional[str] = Query(None, description="Filter by portal source: 'LinkedIn' or 'TopJobs'"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(25, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db)
@@ -92,9 +93,11 @@ def list_collected_jobs(
         keyword=keyword,
         location=location,
         company=company,
+        source=source,
         page=page,
         page_size=page_size
     )
+
 
 
 @router.get(

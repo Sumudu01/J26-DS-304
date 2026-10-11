@@ -1,3 +1,4 @@
+import difflib
 import hashlib
 import json
 import logging
@@ -7,7 +8,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import quote, urlparse, parse_qs
+from urllib.parse import quote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -32,7 +33,7 @@ class JobData:
     posted_date_text: str
     posted_timestamp: Optional[datetime] = None
     job_id: Optional[str] = None
-    source: str = "LinkedIn"
+    source: str = "LinkedIn"  # "LinkedIn" | "TopJobs" | "Cross-Platform"
     search_keyword: Optional[str] = None
     quality_score: int = 100
     description_raw: Optional[str] = None
@@ -66,10 +67,12 @@ class AgentExecutionReport:
     jobs_collected: int
     new_saved_count: int
     duplicates_skipped: int
+    cross_platform_duplicates_merged: int
     requests_made: int
     rate_limit_events: int
     status: str  # completed, partial, failed, rate_limited
     duration_seconds: float
+    sources_scraped: List[str] = field(default_factory=list)
     telemetry_trace: List[Dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -77,16 +80,29 @@ class AgentExecutionReport:
         return asdict(self)
 
 
-class ScraperConfig:
-    """Agent web communication, header rotation pool, and polite pacing configuration."""
+class LinkedInConfig:
+    """Configuration for LinkedIn Guest API."""
     BASE_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+    DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting"
     JOBS_PER_PAGE = 25
     MIN_DELAY = 2.0
-    MAX_DELAY = 4.5
+    MAX_DELAY = 4.0
     RATE_LIMIT_COOLDOWN = 35.0
-    MAX_CONSECUTIVE_EMPTY_PAGES = 3
-    MAX_RETRIES_PER_REQUEST = 3
 
+
+class TopJobsConfig:
+    """Configuration for TopJobs.lk portal."""
+    BASE_URL = "https://www.topjobs.lk"
+    SEARCH_URL = "https://www.topjobs.lk/do.landing"
+    VACANCY_URL = "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp"
+    ADVERT_URL = "https://www.topjobs.lk/employer/JobAdvertismentServlet"
+    IT_FUNCTIONAL_AREA = "SDQ"  # Software Development / DB / QA / Web
+    MIN_DELAY = 1.5
+    MAX_DELAY = 3.5
+
+
+class GlobalScraperConfig:
+    """Common browser simulation settings."""
     USER_AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -101,189 +117,190 @@ class ScraperConfig:
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "DNT": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
         "Upgrade-Insecure-Requests": "1",
         "Cache-Control": "no-cache",
     }
 
 
-class LinkedInDataCollectionAgent:
+class JobDeduplicationEngine:
     """
-    Autonomous Data Collection Agent for Job Postings.
-    
-    Part of the EmploreraLK Job Market Demand Forecasting Engine (Module 1).
-    Implements autonomous agentic capabilities:
-      1. Goal Perception: Ingests search criteria and queries active database memory.
-      2. Adaptive Planning: Dynamically manages pagination, pacing, and jitter.
-      3. Cognition & Reflection: Diagnoses HTTP 429 rate limits, anti-bot roadblocks,
-         and DOM layout shifts, autonomously pivoting retry backoffs and user agents.
-      4. Quality & Deduplication Memory: Validates job card integrity and maintains
-         session & database deduplication filters.
-      5. Multi-sink Persistence: Commits to PostgreSQL via SQLAlchemy and exports CSV snapshots.
+    Multi-stage semantic & fuzzy deduplication engine.
+    Detects identical and similar job postings across LinkedIn, TopJobs,
+    and previous database records to guarantee unique postings.
     """
 
-    def __init__(self, db: Optional[Session] = None):
-        self.db = db
-        self.session = self._setup_session()
-        self.memory_known_ids: Set[str] = set()
-        self.telemetry_trace: List[AgentStepTelemetry] = []
-        self._load_memory()
+    COMPANY_LEGAL_SUFFIXES = [
+        r"\(pvt\)\s*ltd", r"pvt\s*ltd", r"\(private\)\s*limited", r"private\s*limited",
+        r"ltd\.?", r"inc\.?", r"llc\.?", r"corp\.?", r"sri\s*lanka", r"lanka"
+    ]
 
-    def _setup_session(self) -> requests.Session:
-        """Initialize requests session with resilient retries."""
-        session = requests.Session()
-        retries = Retry(
-            total=ScraperConfig.MAX_RETRIES_PER_REQUEST,
-            backoff_factor=1.0,
-            status_forcelist=[500, 502, 503, 504],
-            raise_on_status=False
+    TITLE_NOISE_TOKENS = [
+        r"\(\d+\)", r"\(urgent\)", r"urgent", r"remote", r"hybrid", r"onsite",
+        r"full\s*time", r"part\s*time", r"contract", r"immediate"
+    ]
+
+    @classmethod
+    def clean_company_name(cls, company: str) -> str:
+        """Strip legal entity suffixes and country markers for canonical comparison."""
+        if not company:
+            return ""
+        c = company.lower()
+        for pattern in cls.COMPANY_LEGAL_SUFFIXES:
+            c = re.sub(pattern, " ", c)
+        c = re.sub(r"[^\w\s]", " ", c)
+        return " ".join(c.split())
+
+    @classmethod
+    def clean_job_title(cls, title: str) -> str:
+        """Strip recruitment tags (e.g. '(50)', 'Remote') for canonical comparison."""
+        if not title:
+            return ""
+        t = title.lower()
+        for pattern in cls.TITLE_NOISE_TOKENS:
+            t = re.sub(pattern, " ", t)
+        t = re.sub(r"[^\w\s]", " ", t)
+        return " ".join(t.split())
+
+    @classmethod
+    def composite_key(cls, title: str, company: str) -> str:
+        """Normalized title + company fingerprint."""
+        norm_t = cls.clean_job_title(title).replace(" ", "")
+        norm_c = cls.clean_company_name(company).replace(" ", "")
+        return f"{norm_t}::{norm_c}"
+
+    @classmethod
+    def similarity_ratio(cls, s1: str, s2: str) -> float:
+        """Calculate difflib character sequence similarity ratio."""
+        if not s1 or not s2:
+            return 0.0
+        return difflib.SequenceMatcher(None, s1, s2).ratio()
+
+    @classmethod
+    def token_jaccard(cls, s1: str, s2: str) -> float:
+        """Calculate token set Jaccard similarity."""
+        set1 = set(s1.split())
+        set2 = set(s2.split())
+        if not set1 or not set2:
+            return 0.0
+        return len(set1 & set2) / len(set1 | set2)
+
+    @classmethod
+    def are_jobs_similar(
+        cls,
+        job1_title: str,
+        job1_company: str,
+        job2_title: str,
+        job2_company: str,
+        threshold: float = 0.85
+    ) -> Tuple[bool, float, str]:
+        """
+        Check if two job postings represent the exact same or duplicate vacancy
+        across different portals using fuzzy string & token alignment.
+        """
+        clean_c1 = cls.clean_company_name(job1_company)
+        clean_c2 = cls.clean_company_name(job2_company)
+        clean_t1 = cls.clean_job_title(job1_title)
+        clean_t2 = cls.clean_job_title(job2_title)
+
+        # 1. Exact cleaned match
+        if clean_c1 == clean_c2 and clean_t1 == clean_t2:
+            return True, 1.0, "Exact Title & Company Match"
+
+        # 2. Company comparison
+        c_sim = max(
+            cls.similarity_ratio(clean_c1, clean_c2),
+            cls.token_jaccard(clean_c1, clean_c2)
         )
-        session.mount("https://", HTTPAdapter(max_retries=retries))
-        session.mount("http://", HTTPAdapter(max_retries=retries))
-        return session
+        if c_sim < 0.70:
+            return False, c_sim, "Different Companies"
 
-    def _get_random_headers(self) -> Dict[str, str]:
-        """Rotate User-Agent and headers dynamically to emulate real browser sessions."""
-        headers = ScraperConfig.BASE_HEADERS.copy()
-        headers["User-Agent"] = random.choice(ScraperConfig.USER_AGENTS)
-        return headers
-
-    def _load_memory(self) -> None:
-        """Preload existing job IDs from database to prevent redundant re-fetching."""
-        if self.db:
-            try:
-                existing = self.db.query(JobPosting.job_id).all()
-                self.memory_known_ids = {row[0] for row in existing if row[0]}
-                logger.info("Agent memory initialized with %d known job IDs from DB.", len(self.memory_known_ids))
-            except Exception as e:
-                logger.warning("Could not pre-load memory from DB: %s", e)
-
-    def _record_telemetry(self, action: str, thought: str, observation: str, status: str = "ok") -> None:
-        """Record step-by-step agent reasoning for telemetry and audit logs."""
-        step_number = len(self.telemetry_trace) + 1
-        entry = AgentStepTelemetry(
-            step_number=step_number,
-            action=action,
-            thought=thought,
-            observation=observation,
-            status=status
+        # 3. Title comparison
+        t_sim = max(
+            cls.similarity_ratio(clean_t1, clean_t2),
+            cls.token_jaccard(clean_t1, clean_t2)
         )
-        self.telemetry_trace.append(entry)
-        logger.info("[Agent Step %d] Action: %s | Obs: %s", step_number, action, observation)
 
-    def _build_search_url(self, keywords: str, location: str, start: int = 0) -> str:
-        """Build LinkedIn Guest Jobs API endpoint URL."""
-        params = {
-            "keywords": keywords,
-            "location": location,
-            "start": start,
-        }
-        return f"{ScraperConfig.BASE_URL}?{'&'.join(f'{k}={quote(str(v))}' for k, v in params.items())}"
+        overall_score = (0.5 * c_sim) + (0.5 * t_sim)
 
-    def _clean_job_url(self, url: str) -> str:
-        """Strip tracking parameters from job URL for clean canonical storage."""
+        if c_sim >= 0.80 and t_sim >= 0.78 and overall_score >= threshold:
+            return True, overall_score, f"Fuzzy Duplicate (Company: {c_sim:.2f}, Title: {t_sim:.2f})"
+
+        return False, overall_score, "Below Threshold"
+
+
+class LinkedInCollector:
+    """Specialized collector for LinkedIn Guest API postings and full descriptions."""
+
+    def __init__(self, session: requests.Session):
+        self.session = session
+
+    def build_search_url(self, keywords: str, location: str, start: int = 0) -> str:
+        params = {"keywords": keywords, "location": location, "start": start}
+        return f"{LinkedInConfig.BASE_URL}?{'&'.join(f'{k}={quote(str(v))}' for k, v in params.items())}"
+
+    def clean_job_url(self, url: str) -> str:
         if not url:
             return ""
-        if "?" in url:
-            url = url.split("?")[0]
-        return url.strip()
+        return url.split("?")[0].strip()
 
-    def _extract_job_id(self, card: BeautifulSoup, clean_url: str) -> str:
-        """
-        Extract unique job identifier using multiple fallback strategies:
-        1. LinkedIn entity URN attribute (data-entity-urn)
-        2. Numeric ID embedded in clean URL
-        3. Deterministic SHA-256 hash of canonical URL
-        """
-        entity_urn = card.get("data-entity-urn") or card.get("data-job-id")
-        if entity_urn:
-            match = re.search(r"(\d+)", entity_urn)
+    def extract_job_id(self, card: BeautifulSoup, clean_url: str) -> str:
+        urn = card.get("data-entity-urn") or card.get("data-job-id")
+        if urn:
+            match = re.search(r"(\d+)", urn)
             if match:
                 return f"li_{match.group(1)}"
-
-        # Try URL match, e.g. /jobs/view/12345678 or /jobs/view/software-engineer-12345678
         match = re.search(r"/view/(?:.*-)?(\d+)", clean_url)
         if match:
             return f"li_{match.group(1)}"
-
-        # Fallback to deterministic hash
         return f"li_hash_{hashlib.sha256(clean_url.encode('utf-8')).hexdigest()[:16]}"
 
-    def _extract_job_data(self, card: BeautifulSoup, keyword: str) -> Optional[JobData]:
-        """
-        Extract and evaluate structured job data from a LinkedIn HTML card
-        using an autonomous fallback tree to handle layout shifts.
-        """
+    def parse_job_card(self, card: BeautifulSoup, keyword: str) -> Optional[JobData]:
         try:
-            # 1. Title Extraction with fallback selectors
             title_tag = (
                 card.find("h3", class_="base-search-card__title")
                 or card.find("h3", class_="base-searchcard__title")
-                or card.find("span", class_="sr-only")
                 or card.find("h3")
             )
             title = title_tag.text.strip() if title_tag else "Unknown Title"
 
-            # 2. Company Extraction with fallback selectors
-            company_tag = (
+            comp_tag = (
                 card.find("h4", class_="base-search-card__subtitle")
                 or card.find("h4", class_="base-searchcard__subtitle")
                 or card.find("a", class_="hidden-nested-link")
                 or card.find("h4")
             )
-            company = company_tag.text.strip() if company_tag else "Unknown Company"
+            company = comp_tag.text.strip() if comp_tag else "Unknown Company"
 
-            # 3. Location Extraction
             loc_tag = (
                 card.find("span", class_="job-search-card__location")
                 or card.find("span", class_="job-searchcard__location")
-                or card.find("span", class_="main-job-card__location")
             )
             location = loc_tag.text.strip() if loc_tag else "Sri Lanka"
 
-            # 4. Job Link Extraction
             link_tag = (
                 card.find("a", class_="base-card__full-link")
                 or card.find("a", class_="base-search-card--link")
                 or card.find("a", href=re.compile(r"/jobs/view/"))
-                or card.find("a")
             )
             if not link_tag or not link_tag.get("href"):
                 return None
             raw_url = link_tag.get("href")
-            clean_url = self._clean_job_url(raw_url)
+            clean_url = self.clean_job_url(raw_url)
+            job_id = self.extract_job_id(card, clean_url)
 
-            # 5. Extract Unique Job ID
-            job_id = self._extract_job_id(card, clean_url)
-
-            # 6. Posted Date & ISO Timestamp Extraction
             date_tag = (
                 card.find("time", class_="job-search-card__listdate")
                 or card.find("time", class_="job-searchcard__listdate")
                 or card.find("time")
             )
             posted_date_text = date_tag.text.strip() if date_tag else "Recently"
-            posted_timestamp: Optional[datetime] = None
-
+            posted_timestamp = None
             if date_tag and date_tag.get("datetime"):
-                raw_dt_str = date_tag["datetime"]
                 try:
-                    # Normalize ISO 8601 UTC indicator 'Z' to '+00:00'
-                    norm_str = raw_dt_str.replace("Z", "+00:00")
-                    posted_timestamp = datetime.fromisoformat(norm_str)
-                except Exception as ex:
-                    logger.debug("Date parse fallback for %s: %s", raw_dt_str, ex)
-
-            # 7. Quality Assessment
-            quality_score = 100
-            if title == "Unknown Title":
-                quality_score -= 30
-            if company == "Unknown Company":
-                quality_score -= 30
-            if not posted_timestamp:
-                quality_score -= 10
+                    norm = date_tag["datetime"].replace("Z", "+00:00")
+                    posted_timestamp = datetime.fromisoformat(norm)
+                except Exception:
+                    pass
 
             return JobData(
                 title=title,
@@ -295,47 +312,319 @@ class LinkedInDataCollectionAgent:
                 job_id=job_id,
                 source="LinkedIn",
                 search_keyword=keyword,
-                quality_score=max(0, quality_score),
+                quality_score=95,
+                raw_metadata={"raw_url": raw_url, "portal": "LinkedIn"}
+            )
+        except Exception:
+            return None
+
+    def fetch_job_description(self, job_id: str, headers: Dict[str, str]) -> Optional[str]:
+        """Fetch full job description text from LinkedIn guest job posting endpoint."""
+        # Extract numeric id from e.g. 'li_4476810189'
+        match = re.search(r"li_(\d+)", job_id)
+        if not match:
+            return None
+        numeric_id = match.group(1)
+        url = f"{LinkedInConfig.DETAIL_URL}/{numeric_id}"
+
+        try:
+            res = self.session.get(url, headers=headers, timeout=12)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                desc_tag = (
+                    soup.find("div", class_="show-more-less-html__markup")
+                    or soup.find("section", class_="show-more-less-html")
+                    or soup.find("div", class_="description__text")
+                )
+                if desc_tag:
+                    return desc_tag.get_text(separator="\n", strip=True)
+            return None
+        except Exception as e:
+            logger.debug("Failed to fetch LinkedIn job description for %s: %s", job_id, e)
+            return None
+
+
+class TopJobsCollector:
+    """Specialized collector for TopJobs.lk portal postings and full descriptions."""
+
+    def __init__(self, session: requests.Session):
+        self.session = session
+
+    def fetch_listings(self, keyword: str, headers: Dict[str, str]) -> List[Tuple[BeautifulSoup, Dict[str, str]]]:
+        """
+        Query TopJobs vacancy list by keyword using POST request,
+        with fallback to IT functional area category.
+        """
+        cards: List[Tuple[BeautifulSoup, Dict[str, str]]] = []
+        try:
+            # 1. Search via POST with keyword
+            post_data = {
+                "txtKeyWord": keyword,
+                "btnSearch": "Search",
+                "hdnCurrentPage": "1",
+            }
+            res = self.session.post(
+                TopJobsConfig.VACANCY_URL,
+                data=post_data,
+                headers=headers,
+                timeout=18
+            )
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                rows = [tr for tr in soup.find_all("tr") if tr.get("id", "").startswith("tr")]
+                for tr in rows:
+                    cards.append((tr, {"query": keyword, "type": "keyword_search"}))
+
+            # 2. If fewer than 15 results, augment with IT functional area
+            if len(cards) < 15:
+                cat_url = f"{TopJobsConfig.VACANCY_URL}?FA={TopJobsConfig.IT_FUNCTIONAL_AREA}&jst=OPEN"
+                res_cat = self.session.get(cat_url, headers=headers, timeout=18)
+                if res_cat.status_code == 200:
+                    soup_cat = BeautifulSoup(res_cat.text, "html.parser")
+                    cat_rows = [tr for tr in soup_cat.find_all("tr") if tr.get("id", "").startswith("tr")]
+                    for tr in cat_rows:
+                        cards.append((tr, {"query": keyword, "type": "functional_area_it"}))
+
+        except Exception as e:
+            logger.error("Error querying TopJobs listings: %s", e)
+
+        return cards
+
+    def parse_job_row(self, row: BeautifulSoup, meta: Dict[str, str]) -> Optional[JobData]:
+        """Parse TopJobs HTML table row into standardized JobData."""
+        try:
+            # Title inside <h2>
+            h2 = row.find("h2")
+            if not h2:
+                return None
+            title = h2.get_text(separator=" ", strip=True)
+
+            # Company inside <h1>
+            h1 = row.find("h1")
+            company = h1.get_text(separator=" ", strip=True) if h1 else "Unknown Company"
+
+            # Codes: jc (job code), ec (employer code), ac (ad code)
+            onclick_str = row.get("onclick", "")
+            jc, ec, ac = "", "DEFZZZ", "DEFZZZ"
+            match = re.search(r"createAlert\s*\(\s*'\d+'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'", onclick_str)
+            if match:
+                ac, jc, ec = match.group(1), match.group(2), match.group(3)
+            else:
+                # Fallback to hidden spans
+                jc_span = row.find("span", id=re.compile(r"hdnJC"))
+                ec_span = row.find("span", id=re.compile(r"hdnEC"))
+                ac_span = row.find("span", id=re.compile(r"hdnAC"))
+                if jc_span:
+                    jc = jc_span.text.strip()
+                if ec_span:
+                    ec = ec_span.text.strip()
+                if ac_span:
+                    ac = ac_span.text.strip()
+
+            if not jc:
+                # Fallback to row index or hash
+                jc = hashlib.sha256(f"{title}_{company}".encode("utf-8")).hexdigest()[:10]
+
+            job_id = f"tj_{jc}"
+            job_link = f"{TopJobsConfig.ADVERT_URL}?ac={ac}&jc={jc}&ec={ec}"
+
+            # Opening date in cell
+            tds = row.find_all("td")
+            posted_date_text = "Recently"
+            posted_timestamp = None
+            if len(tds) >= 5:
+                date_candidate = tds[4].get_text(strip=True)
+                if date_candidate:
+                    posted_date_text = date_candidate
+                    try:
+                        # TopJobs date format e.g. "Sun Oct 11 2026"
+                        dt = datetime.strptime(date_candidate, "%a %b %d %Y")
+                        posted_timestamp = dt.replace(tzinfo=timezone.utc)
+                    except Exception:
+                        pass
+
+            return JobData(
+                title=title,
+                company=company,
+                location="Sri Lanka",
+                job_link=job_link,
+                posted_date_text=posted_date_text,
+                posted_timestamp=posted_timestamp,
+                job_id=job_id,
+                source="TopJobs",
+                search_keyword=meta.get("query", "IT"),
+                quality_score=95,
                 raw_metadata={
-                    "raw_url": raw_url,
-                    "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    "jc": jc,
+                    "ec": ec,
+                    "ac": ac,
+                    "portal": "TopJobs.lk",
+                    "discovery_type": meta.get("type", "search")
                 }
             )
         except Exception as e:
-            logger.debug("Failed parsing job card: %s", e)
+            logger.debug("Failed parsing TopJobs row: %s", e)
             return None
 
-    def _fetch_page(self, url: str) -> Tuple[Optional[BeautifulSoup], int, str]:
-        """
-        Execute HTTP request with agent sensory assessment:
-        Returns: (BeautifulSoup or None, status_code, message)
-        """
-        headers = self._get_random_headers()
+    def fetch_job_description(self, ad_url: str, headers: Dict[str, str]) -> Optional[str]:
+        """Fetch full advertisement and job description text from TopJobs servlet."""
         try:
-            response = self.session.get(url, headers=headers, timeout=15)
-            status = response.status_code
+            res = self.session.get(ad_url, headers=headers, timeout=15)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                # Remove scripts, styles, navigation alerts
+                for tag in soup(["script", "style", "noscript", "meta"]):
+                    tag.extract()
+                text = soup.get_text(separator="\n", strip=True)
+                # Remove repetitive TopJobs boilerplate lines
+                cleaned_lines = []
+                for line in text.splitlines():
+                    l = line.strip()
+                    if l and not l.startswith("Seems you have change your Email") and l != "VACVIEW" and l != "":
+                        cleaned_lines.append(l)
+                return "\n".join(cleaned_lines)
+            return None
+        except Exception as e:
+            logger.debug("Failed fetching TopJobs description from %s: %s", ad_url, e)
+            return None
 
-            if status == 200:
-                soup = BeautifulSoup(response.text, "html.parser")
-                return soup, 200, "Success"
-            elif status == 429:
-                return None, 429, "Rate Limited (HTTP 429)"
-            elif status in (403, 401):
-                return None, status, f"Access Blocked/Forbidden (HTTP {status})"
-            else:
-                return None, status, f"Unexpected response status (HTTP {status})"
-        except requests.RequestException as e:
-            return None, 0, f"Network request exception: {str(e)}"
 
-    def execute_goal(self, goal: AgentCollectionGoal, run_id: Optional[str] = None) -> AgentExecutionReport:
+class LinkedInDataCollectionAgent:
+    """
+    Autonomous Job Data Collection Agent for LinkedIn & TopJobs.lk.
+    
+    Part of the EmploreraLK Job Market Demand Forecasting Engine (Module 1).
+    Key Capabilities:
+      1. Dual-Platform Crawling: Autonomously collects vacancies from both LinkedIn
+         and TopJobs.lk with complete job descriptions.
+      2. Multi-Stage Deduplication: Detects exact ID duplicates, identical URLs,
+         and fuzzy cross-platform duplicates (same position cross-posted on both portals).
+      3. Self-Healing & Polite Pacing: Senses HTTP 429 rate limiting, triggers exponential
+         cooldowns with jitter, and rotates browser fingerprints.
+      4. Structured Dual-Sink Persistence: Neon PostgreSQL (`job_postings`, `data_collection_runs`)
+         and optional CSV exports.
+    """
+
+    def __init__(self, db: Optional[Session] = None):
+        self.db = db
+        self.session = self._setup_session()
+        self.linkedin_collector = LinkedInCollector(self.session)
+        self.topjobs_collector = TopJobsCollector(self.session)
+
+        # Episodic Memory banks
+        self.memory_known_ids: Set[str] = set()
+        self.memory_known_urls: Set[str] = set()
+        self.memory_known_jobs: List[JobData] = []
+        self.telemetry_trace: List[AgentStepTelemetry] = []
+
+        self._load_memory()
+
+    def _setup_session(self) -> requests.Session:
+        session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=1.0,
+            status_forcelist=[500, 502, 503, 504],
+            raise_on_status=False
+        )
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+        session.mount("http://", HTTPAdapter(max_retries=retries))
+        return session
+
+    def _get_random_headers(self) -> Dict[str, str]:
+        headers = GlobalScraperConfig.BASE_HEADERS.copy()
+        headers["User-Agent"] = random.choice(GlobalScraperConfig.USER_AGENTS)
+        return headers
+
+    def _load_memory(self) -> None:
+        """Preload existing job IDs and metadata from DB to guarantee absolute uniqueness."""
+        if self.db:
+            try:
+                existing = self.db.query(
+                    JobPosting.job_id,
+                    JobPosting.job_link,
+                    JobPosting.title,
+                    JobPosting.company,
+                    JobPosting.source
+                ).all()
+
+                for row in existing:
+                    if row[0]:
+                        self.memory_known_ids.add(row[0])
+                    if row[1]:
+                        self.memory_known_urls.add(row[1])
+                    if row[2] and row[3]:
+                        # Load minimal JobData into memory bank for fuzzy cross-platform checks
+                        self.memory_known_jobs.append(
+                            JobData(
+                                title=row[2],
+                                company=row[3],
+                                location="Sri Lanka",
+                                job_link=row[1] or "",
+                                posted_date_text="",
+                                job_id=row[0],
+                                source=row[4] or "Existing"
+                            )
+                        )
+                logger.info(
+                    "Agent memory initialized with %d IDs and %d existing job profiles.",
+                    len(self.memory_known_ids), len(self.memory_known_jobs)
+                )
+            except Exception as e:
+                logger.warning("Could not pre-load memory from DB: %s", e)
+
+    def _record_telemetry(self, action: str, thought: str, observation: str, status: str = "ok") -> None:
+        step_number = len(self.telemetry_trace) + 1
+        entry = AgentStepTelemetry(
+            step_number=step_number,
+            action=action,
+            thought=thought,
+            observation=observation,
+            status=status
+        )
+        self.telemetry_trace.append(entry)
+        logger.info("[Agent Step %d] Action: %s | Obs: %s", step_number, action, observation)
+
+    def _evaluate_and_deduplicate(
+        self,
+        candidate: JobData,
+        similarity_threshold: float = 0.85
+    ) -> Tuple[bool, str]:
         """
-        Autonomously execute the data collection goal.
-        
-        Orchestrates the autonomous loop:
-          - Senses target and initializes execution run record.
-          - Dynamically pages through results until target reached or end-of-results.
-          - Autonomously recovers from rate limiting with backoff and header rotation.
-          - Deduplicates and persists findings to database and optional CSV.
+        Interrogate memory bank to see if candidate is a duplicate
+        (exact ID, exact URL, or fuzzy cross-platform match).
+        Returns: (is_duplicate, reason)
+        """
+        # 1. Exact ID
+        if candidate.job_id and candidate.job_id in self.memory_known_ids:
+            return True, f"Exact Job ID match ({candidate.job_id})"
+
+        # 2. Exact Link
+        if candidate.job_link and candidate.job_link in self.memory_known_urls:
+            return True, f"Exact URL match ({candidate.job_link})"
+
+        # 3. Fuzzy match against memory bank (Cross-Platform & Intra-Platform)
+        for existing in self.memory_known_jobs:
+            is_similar, score, reason = JobDeduplicationEngine.are_jobs_similar(
+                candidate.title, candidate.company,
+                existing.title, existing.company,
+                threshold=similarity_threshold
+            )
+            if is_similar:
+                # Same position cross-posted on both platforms
+                return True, f"Cross-platform match with {existing.source} post '{existing.title}' at '{existing.company}' (Score: {score:.2f} — {reason})"
+
+        return False, "Unique post"
+
+    def execute_goal(
+        self,
+        goal: AgentCollectionGoal,
+        run_id: Optional[str] = None
+    ) -> AgentExecutionReport:
+        """
+        Autonomously orchestrate data collection from LinkedIn and TopJobs,
+        fetch complete job descriptions, perform cross-platform deduplication,
+        and persist unique postings.
         """
         start_time = time.time()
         if not run_id:
@@ -344,21 +633,31 @@ class LinkedInDataCollectionAgent:
         keywords = goal.keywords.strip()
         location = goal.location.strip()
         max_jobs = goal.max_jobs
+        sources = [s.strip().lower() for s in goal.sources] if goal.sources else ["linkedin", "topjobs"]
+
+        # Track sources to scrape
+        scrape_linkedin = any("linkedin" in s for s in sources)
+        scrape_topjobs = any("topjobs" in s for s in sources)
+        active_sources_display = []
+        if scrape_linkedin:
+            active_sources_display.append("LinkedIn")
+        if scrape_topjobs:
+            active_sources_display.append("TopJobs.lk")
 
         self._record_telemetry(
-            action="INITIALIZE_GOAL",
-            thought=f"Deploying autonomous agent for target: '{keywords}' in '{location}'. Target quota: {max_jobs} jobs.",
-            observation=f"Initial memory contains {len(self.memory_known_ids)} known job IDs.",
+            action="INITIALIZE_MULTI_PLATFORM_GOAL",
+            thought=f"Deploying autonomous agent across {', '.join(active_sources_display)} for query '{keywords}' in '{location}'. Target quota: {max_jobs} unique jobs.",
+            observation=f"Initial memory bank loaded with {len(self.memory_known_ids)} known IDs and {len(self.memory_known_jobs)} reference profiles.",
             status="ok"
         )
 
-        # Create DataCollectionRun record in DB if available
+        # Initialize DB Run record
         db_run: Optional[DataCollectionRun] = None
         if self.db:
             try:
                 db_run = DataCollectionRun(
                     run_id=run_id,
-                    source="LinkedIn",
+                    source=",".join(active_sources_display),
                     target_keywords=keywords,
                     target_location=location,
                     target_count=max_jobs,
@@ -373,120 +672,181 @@ class LinkedInDataCollectionAgent:
                 if self.db:
                     self.db.rollback()
 
-        all_collected_jobs: List[JobData] = []
-        new_jobs_to_persist: List[JobData] = []
+        unique_collected_jobs: List[JobData] = []
         duplicates_skipped = 0
+        cross_platform_merged = 0
         rate_limit_events = 0
         requests_made = 0
-        consecutive_empty = 0
-        offset = 0
 
-        while len(all_collected_jobs) < max_jobs and consecutive_empty < ScraperConfig.MAX_CONSECUTIVE_EMPTY_PAGES:
-            target_url = self._build_search_url(keywords, location, start=offset)
-            requests_made += 1
+        # Quota allocation: balance between platforms
+        target_per_platform = max_jobs if len(active_sources_display) <= 1 else (max_jobs // 2) + (max_jobs % 2)
 
+        # ─── 1. TopJobs.lk Collection Cycle ──────────────────────────────────
+        if scrape_topjobs and len(unique_collected_jobs) < max_jobs:
             self._record_telemetry(
-                action="FETCH_PAGE",
-                thought=f"Requesting offset {offset}. Progress: {len(all_collected_jobs)}/{max_jobs} collected.",
-                observation=f"Target URL: {target_url}",
+                action="ACTIVATE_TOPJOBS_CRAWLER",
+                thought=f"Initiating TopJobs.lk harvest for keyword '{keywords}'.",
+                observation=f"Connecting to {TopJobsConfig.BASE_URL} and {TopJobsConfig.VACANCY_URL}.",
                 status="in_progress"
             )
 
-            soup, status_code, message = self._fetch_page(target_url)
-
-            # Autonomous Reflection on Response Status
-            if status_code == 429:
-                rate_limit_events += 1
-                cooldown = ScraperConfig.RATE_LIMIT_COOLDOWN + random.uniform(2.0, 8.0)
-                self._record_telemetry(
-                    action="HANDLE_RATE_LIMIT",
-                    thought="HTTP 429 Rate Limit sensed. Initiating autonomous exponential cooldown, jitter, and session rotation.",
-                    observation=f"Cooling down for {cooldown:.1f} seconds before retrying.",
-                    status="rate_limited"
-                )
-                time.sleep(cooldown)
-                # Rotate session
-                self.session = self._setup_session()
-                continue
-
-            elif status_code != 200:
-                self._record_telemetry(
-                    action="HANDLE_HTTP_ERROR",
-                    thought=f"Received non-200 status {status_code}: {message}. Backing off.",
-                    observation=f"Retrying offset {offset} after polite pause.",
-                    status="warning"
-                )
-                consecutive_empty += 1
-                time.sleep(5.0)
-                continue
-
-            # Parse DOM Cards
-            job_cards = soup.find_all("div", class_="base-card") if soup else []
-            if not job_cards:
-                # Fallback to li elements
-                job_cards = soup.find_all("li") if soup else []
-
-            if not job_cards:
-                consecutive_empty += 1
-                self._record_telemetry(
-                    action="EVALUATE_EMPTY_PAGE",
-                    thought=f"No job cards found at offset {offset}. Consecutive empty count: {consecutive_empty}.",
-                    observation="Possible end of available listings or dynamic block.",
-                    status="warning"
-                )
-                offset += ScraperConfig.JOBS_PER_PAGE
-                time.sleep(random.uniform(goal.min_delay, goal.max_delay))
-                continue
-
-            consecutive_empty = 0
-            page_extracted_count = 0
-            page_duplicates_count = 0
-
-            for card in job_cards:
-                job_data = self._extract_job_data(card, keywords)
-                if not job_data or not job_data.job_id:
-                    continue
-
-                if job_data.job_id in self.memory_known_ids:
-                    duplicates_skipped += 1
-                    page_duplicates_count += 1
-                    continue
-
-                # Valid new job found
-                self.memory_known_ids.add(job_data.job_id)
-                all_collected_jobs.append(job_data)
-                new_jobs_to_persist.append(job_data)
-                page_extracted_count += 1
-
-                if len(all_collected_jobs) >= max_jobs:
-                    break
+            headers = self._get_random_headers()
+            raw_cards = self.topjobs_collector.fetch_listings(keywords, headers)
+            requests_made += 1
 
             self._record_telemetry(
-                action="PROCESS_BATCH",
-                thought=f"Parsed offset {offset}. New valid: {page_extracted_count}, Duplicates skipped: {page_duplicates_count}.",
-                observation=f"Total gathered so far: {len(all_collected_jobs)}/{max_jobs}.",
+                action="PROCESS_TOPJOBS_LISTINGS",
+                thought=f"Received {len(raw_cards)} raw vacancy rows from TopJobs.lk. Beginning deduplication and description extraction.",
+                observation=f"Parsing HTML candidate rows.",
                 status="ok"
             )
 
-            if len(all_collected_jobs) >= max_jobs:
-                self._record_telemetry(
-                    action="GOAL_SATISFIED",
-                    thought=f"Target quota of {max_jobs} jobs satisfied.",
-                    observation="Terminating pagination loop.",
-                    status="ok"
+            topjobs_collected_in_batch = 0
+            for tr, meta in raw_cards:
+                if len(unique_collected_jobs) >= max_jobs:
+                    break
+                if scrape_linkedin and topjobs_collected_in_batch >= target_per_platform:
+                    break
+
+                parsed_job = self.topjobs_collector.parse_job_row(tr, meta)
+                if not parsed_job or not parsed_job.job_id:
+                    continue
+
+                # Deduplication check
+                is_dup, dup_reason = self._evaluate_and_deduplicate(
+                    parsed_job, similarity_threshold=goal.similarity_threshold
                 )
-                break
+                if is_dup:
+                    duplicates_skipped += 1
+                    if "Cross-platform" in dup_reason:
+                        cross_platform_merged += 1
+                    logger.debug("TopJobs duplicate skipped: %s (%s)", parsed_job.title, dup_reason)
+                    continue
 
-            # Adaptive delay with random jitter for anti-bot politeness
-            offset += ScraperConfig.JOBS_PER_PAGE
-            delay = random.uniform(goal.min_delay, goal.max_delay)
-            time.sleep(delay)
+                # Fetch full job description if requested
+                if goal.fetch_full_description and parsed_job.job_link:
+                    time.sleep(random.uniform(0.8, goal.min_delay))
+                    requests_made += 1
+                    desc_text = self.topjobs_collector.fetch_job_description(parsed_job.job_link, headers)
+                    if desc_text:
+                        parsed_job.description_raw = desc_text
+                        parsed_job.quality_score = 100
 
-        # Database Persistence
+                # Register in memory and accepted list
+                self.memory_known_ids.add(parsed_job.job_id)
+                self.memory_known_urls.add(parsed_job.job_link)
+                self.memory_known_jobs.append(parsed_job)
+                unique_collected_jobs.append(parsed_job)
+                topjobs_collected_in_batch += 1
+
+
+            self._record_telemetry(
+                action="TOPJOBS_CYCLE_COMPLETE",
+                thought=f"TopJobs phase finished. Total gathered so far: {len(unique_collected_jobs)}/{max_jobs}.",
+                observation=f"TopJobs unique posts stored: {sum(1 for j in unique_collected_jobs if j.source == 'TopJobs')}.",
+                status="ok"
+            )
+
+        # ─── 2. LinkedIn Collection Cycle ────────────────────────────────────
+        if scrape_linkedin and len(unique_collected_jobs) < max_jobs:
+            self._record_telemetry(
+                action="ACTIVATE_LINKEDIN_CRAWLER",
+                thought=f"Initiating LinkedIn Guest API harvest for '{keywords}' in '{location}'. Remaining quota: {max_jobs - len(unique_collected_jobs)}.",
+                observation=f"Connecting to {LinkedInConfig.BASE_URL}.",
+                status="in_progress"
+            )
+
+            li_offset = 0
+            li_consecutive_empty = 0
+
+            while len(unique_collected_jobs) < max_jobs and li_consecutive_empty < 3:
+                target_url = self.linkedin_collector.build_search_url(keywords, location, start=li_offset)
+                requests_made += 1
+                headers = self._get_random_headers()
+
+                try:
+                    response = self.session.get(target_url, headers=headers, timeout=15)
+                except Exception as e:
+                    logger.warning("LinkedIn request network error: %s", e)
+                    li_consecutive_empty += 1
+                    time.sleep(4.0)
+                    continue
+
+                if response.status_code == 429:
+                    rate_limit_events += 1
+                    cooldown = LinkedInConfig.RATE_LIMIT_COOLDOWN + random.uniform(3.0, 7.0)
+                    self._record_telemetry(
+                        action="HANDLE_LINKEDIN_RATE_LIMIT",
+                        thought="HTTP 429 Rate Limit encountered on LinkedIn. Activating autonomous exponential backoff and session rotation.",
+                        observation=f"Cooling down for {cooldown:.1f}s before resuming.",
+                        status="rate_limited"
+                    )
+                    time.sleep(cooldown)
+                    self.session = self._setup_session()
+                    self.linkedin_collector.session = self.session
+                    continue
+
+                if response.status_code != 200:
+                    li_consecutive_empty += 1
+                    time.sleep(3.0)
+                    continue
+
+                soup = BeautifulSoup(response.text, "html.parser")
+                job_cards = soup.find_all("div", class_="base-card") or soup.find_all("li")
+                if not job_cards:
+                    li_consecutive_empty += 1
+                    li_offset += LinkedInConfig.JOBS_PER_PAGE
+                    time.sleep(random.uniform(goal.min_delay, goal.max_delay))
+                    continue
+
+                li_consecutive_empty = 0
+                for card in job_cards:
+                    if len(unique_collected_jobs) >= max_jobs:
+                        break
+
+                    parsed_job = self.linkedin_collector.parse_job_card(card, keywords)
+                    if not parsed_job or not parsed_job.job_id:
+                        continue
+
+                    # Cross-platform & intra-platform deduplication
+                    is_dup, dup_reason = self._evaluate_and_deduplicate(
+                        parsed_job, similarity_threshold=goal.similarity_threshold
+                    )
+                    if is_dup:
+                        duplicates_skipped += 1
+                        if "Cross-platform" in dup_reason:
+                            cross_platform_merged += 1
+                        logger.debug("LinkedIn duplicate skipped: %s (%s)", parsed_job.title, dup_reason)
+                        continue
+
+                    # Fetch full job description from LinkedIn guest endpoint
+                    if goal.fetch_full_description and parsed_job.job_id:
+                        time.sleep(random.uniform(0.6, goal.min_delay))
+                        requests_made += 1
+                        desc_text = self.linkedin_collector.fetch_job_description(parsed_job.job_id, headers)
+                        if desc_text:
+                            parsed_job.description_raw = desc_text
+                            parsed_job.quality_score = 100
+
+                    # Register in memory and accepted list
+                    self.memory_known_ids.add(parsed_job.job_id)
+                    self.memory_known_urls.add(parsed_job.job_link)
+                    self.memory_known_jobs.append(parsed_job)
+                    unique_collected_jobs.append(parsed_job)
+
+                li_offset += LinkedInConfig.JOBS_PER_PAGE
+                time.sleep(random.uniform(goal.min_delay, goal.max_delay))
+
+        # ─── 3. Database Persistence & Finalization ──────────────────────────
         saved_db_count = 0
-        if self.db and new_jobs_to_persist:
+        if self.db and unique_collected_jobs:
             try:
-                for job in new_jobs_to_persist:
+                for job in unique_collected_jobs:
+                    # Check if already in DB (safety check)
+                    existing_db = self.db.query(JobPosting.id).filter(JobPosting.job_id == job.job_id).first()
+                    if existing_db:
+                        continue
+
                     record = JobPosting(
                         job_id=job.job_id,
                         title=job.title,
@@ -503,21 +863,22 @@ class LinkedInDataCollectionAgent:
                     )
                     record.set_metadata(job.raw_metadata)
                     self.db.add(record)
+                    saved_db_count += 1
+
                 self.db.commit()
-                saved_db_count = len(new_jobs_to_persist)
-                logger.info("Committed %d new job postings to database.", saved_db_count)
+                logger.info("Committed %d unique multi-platform job postings to database.", saved_db_count)
             except Exception as e:
-                logger.error("Failed to commit job postings to DB: %s", e)
+                logger.error("Failed committing jobs to database: %s", e)
                 if self.db:
                     self.db.rollback()
 
         # Optional CSV Export
-        if goal.export_csv and all_collected_jobs:
-            self._export_to_csv(all_collected_jobs, goal.csv_filename)
+        if goal.export_csv and unique_collected_jobs:
+            self._export_to_csv(unique_collected_jobs, goal.csv_filename)
 
         duration = round(time.time() - start_time, 2)
-        final_status = "completed" if len(all_collected_jobs) >= max_jobs else "partial"
-        if rate_limit_events > 0 and len(all_collected_jobs) == 0:
+        final_status = "completed" if len(unique_collected_jobs) >= max_jobs else "partial"
+        if rate_limit_events > 0 and len(unique_collected_jobs) == 0:
             final_status = "rate_limited"
 
         report = AgentExecutionReport(
@@ -525,20 +886,22 @@ class LinkedInDataCollectionAgent:
             goal_keywords=keywords,
             goal_location=location,
             target_count=max_jobs,
-            jobs_collected=len(all_collected_jobs),
-            new_saved_count=saved_db_count if self.db else len(all_collected_jobs),
+            jobs_collected=len(unique_collected_jobs),
+            new_saved_count=saved_db_count if self.db else len(unique_collected_jobs),
             duplicates_skipped=duplicates_skipped,
+            cross_platform_duplicates_merged=cross_platform_merged,
             requests_made=requests_made,
             rate_limit_events=rate_limit_events,
             status=final_status,
             duration_seconds=duration,
+            sources_scraped=active_sources_display,
             telemetry_trace=[asdict(t) for t in self.telemetry_trace]
         )
 
         # Update DataCollectionRun record in DB
         if self.db and db_run:
             try:
-                db_run.collected_count = len(all_collected_jobs)
+                db_run.collected_count = len(unique_collected_jobs)
                 db_run.duplicate_count = duplicates_skipped
                 db_run.status = final_status
                 db_run.completed_at = datetime.now(timezone.utc)
@@ -552,14 +915,13 @@ class LinkedInDataCollectionAgent:
         return report
 
     def _export_to_csv(self, jobs: List[JobData], filename: Optional[str] = None) -> str:
-        """Export collected jobs to CSV file for offline research & forecasting datasets."""
         if not filename:
-            filename = f"linkedin_jobs_{int(time.time())}.csv"
+            filename = f"emploreralk_jobs_{int(time.time())}.csv"
         try:
             records = [job.to_dict() for job in jobs]
             df = pd.DataFrame(records)
             df.to_csv(filename, index=False, encoding="utf-8")
-            logger.info("Successfully exported %d jobs to CSV: %s", len(jobs), filename)
+            logger.info("Successfully exported %d unique jobs to CSV: %s", len(jobs), filename)
             return filename
         except Exception as e:
             logger.error("Failed exporting to CSV: %s", e)

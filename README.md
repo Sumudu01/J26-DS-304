@@ -152,54 +152,73 @@ The backend follows a strict 4-tier layered architecture designed for modularity
 
 ## 🤖 Autonomous Data Collection Agent (Component 1)
 
-The **Data Collection Agent** (`app/components/forecasting/agents/data_collection_agent.py`) is an autonomous AI agent engineered to extract, normalize, and curate live job postings from LinkedIn's guest endpoints and web sources for demand forecasting.
+The **Data Collection Agent** ([`data_collection_agent.py`](file:///e:/Sliit/Y4/RP/J26-DS-304/EmploreraLK/backend/app/components/forecasting/agents/data_collection_agent.py)) is an autonomous AI agent engineered to extract, normalize, deduplicate, and curate live job postings with full job descriptions from both **LinkedIn** and **TopJobs.lk** for the Job Market Demand Forecasting Engine.
 
-### 🔄 Autonomous Perception-Cognition-Action Loop (OODA)
+### 🌐 Supported Platforms
+1. **LinkedIn Guest Portal:**
+   - Search Endpoint: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search`
+   - Job Detail & Full Description Endpoint: `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}`
+2. **TopJobs.lk (Sri Lanka Premier Job Portal):**
+   - Base URL: `https://www.topjobs.lk`
+   - Search Landing: `https://www.topjobs.lk/do.landing`
+   - Vacancy Search: `https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp` (IT category `FA=SDQ` + keyword queries)
+   - Job Advertisement & Full Description: `https://www.topjobs.lk/employer/JobAdvertismentServlet?ac={ac}&jc={jc}&ec={ec}`
+
+---
+
+### 🔄 Multi-Stage Cross-Platform Deduplication Engine
+
+When scraping across multiple platforms, employers frequently cross-post the identical opening on both LinkedIn and TopJobs. The agent incorporates a multi-tier deduplication engine:
 
 ```
-       ┌──────────────────────────────────────────────┐
-       │             1. GOAL PERCEPTION               │
-       │ Reads keyword criteria, probes network       │
-       │ & loads database memory (known job IDs)      │
-       └──────────────────────┬───────────────────────┘
-                              │
-                              ▼
-       ┌──────────────────────────────────────────────┐
-       │         2. SENSORY ORIENTATION               │
-       │ Observes HTTP status (200, 429, 403, 500)    │
-       │ & assesses response freshness / anti-bot     │
-       └──────────────────────┬───────────────────────┘
-                              │
-               ┌──────────────┴──────────────┐
-               │                             │
-    [HTTP 429 Rate Limited]          [HTTP 200 OK]
-               │                             │
-               ▼                             ▼
-┌─────────────────────────────┐ ┌─────────────────────────────┐
-│ 3. SELF-HEALING REFLECTION  │ │ 4. EXTRACTION & EVALUATION  │
-│ - Exponential backoff +     │ │ - Selector Fallback Tree    │
-│   random jitter (35s+)      │ │ - Canonical URL cleaning    │
-│ - Session connection reset  │ │ - ISO UTC timestamp parse   │
-│ - User-Agent pool rotation  │ │ - Quality score calculation │
-└──────────────┬──────────────┘ └──────────────┬──────────────┘
-               │                               │
-               └──────────────┬────────────────┘
-                              │
-                              ▼
-       ┌──────────────────────────────────────────────┐
-       │        5. MEMORY DEDUPLICATION & ACTION      │
-       │ Skips already-seen IDs, persists new rows to │
-       │ PostgreSQL (job_postings, runs) & writes CSV │
-       └──────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                      INCOMING JOB CANDIDATE                            │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  TIER 1: Exact ID & Canonical URL Match                │
+        │  Checks job_id (li_*, tj_*) and clean URL against      │
+        │  in-memory seen set and database index.                │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │ [Not Matched]
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  TIER 2: Normalized Composite Fingerprint Match        │
+        │  Strips legal suffixes ("(pvt) ltd", "private limited",│
+        │  "sri lanka") & title noise ("(urgent)", "remote")     │
+        │  Matches norm_title::norm_company hash.                │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │ [Not Matched]
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  TIER 3: Fuzzy Cross-Platform Semantic Match           │
+        │  Uses token Jaccard & SequenceMatcher similarity:      │
+        │  - Company similarity >= 0.80                          │
+        │  - Title similarity >= 0.78                            │
+        │  - Composite weighted score >= similarity_threshold    │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                 ┌─────────────────┴─────────────────┐
+                 │                                   │
+          [Duplicate Detected]              [Confirmed Unique]
+                 │                                   │
+                 ▼                                   ▼
+ ┌───────────────────────────────┐   ┌───────────────────────────────┐
+ │ DROPPED / ENRICHED            │   │ COMMITTED TO MEMORY & DB      │
+ │ Keeps primary post, enriches  │   │ Saves full title, company,    │
+ │ metadata, increments merged   │   │ link, timestamps, and full    │
+ │ telemetry count.              │   │ job description text.         │
+ └───────────────────────────────┘   └───────────────────────────────┘
 ```
 
-### Key Technical Features:
-1. **Endpoint Resolution:** Communicates with LinkedIn's guest search API (`https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search`).
-2. **Autonomous Rate-Limit Mitigation:** Senses HTTP 429 status codes and initiates automated cooldowns with randomized jitter (35s+) combined with browser pool header rotation.
+### Key Technical Capabilities:
+1. **Full Job Description Ingestion:** Fetches and cleans complete job description text directly from individual advertisement detail pages on both LinkedIn and TopJobs.
+2. **Self-Healing Cognition:** Detects HTTP 429 rate limits, triggers adaptive exponential backoff with randomized jitter (35s+), rotates browser session pools, and refreshes User-Agent fingerprints.
 3. **Selector Fallback Tree:** Employs hierarchical CSS selectors to handle dynamic DOM layout shifts without crashing.
-4. **Deterministic Unique Job IDs:** Extracts LinkedIn entity URN (`data-entity-urn`), clean URL ID patterns (`/view/12345`), or fallback SHA-256 canonical hashes.
-5. **Episodic Deduplication Memory:** Preloads database indexes to ensure jobs already stored in PostgreSQL are never redundantly written.
-6. **Telemetry & Audit Ledger:** Logs step-by-step reasoning (`thought`, `action`, `observation`) into `data_collection_runs`.
+4. **Episodic Memory Bank:** Preloads database indexes to guarantee cross-session deduplication.
+5. **Dual Persistence:** Commits clean records to Neon PostgreSQL (`job_postings`, `data_collection_runs`) and exports CSV datasets.
+
 
 ---
 
@@ -353,42 +372,49 @@ uvicorn app.main:app --reload --port 5000
 ### 2. Running the Autonomous Data Collection Agent
 
 #### Option A: Standalone CLI Runner (`run_agent.py`)
-Run the autonomous agent directly from the command line:
+Run the autonomous agent directly from the command line across LinkedIn and TopJobs:
 
 ```bash
-# Run agent with default settings (Information Technology, Sri Lanka, 50 jobs)
-python run_agent.py --keywords "Information Technology" --location "Sri Lanka" --max-jobs 50 --export-csv
+# Run agent across both LinkedIn & TopJobs.lk (with full descriptions & deduplication)
+python run_agent.py --sources linkedin topjobs --keywords "Information Technology" --location "Sri Lanka" --max-jobs 50 --export-csv
 
-# Gather data for specific roles (e.g. Data Scientist)
-python run_agent.py --keywords "Data Scientist" --location "Sri Lanka" --max-jobs 25
+# Gather data from TopJobs only
+python run_agent.py --sources topjobs --keywords "Software Engineer" --max-jobs 20
 
-# Offline mode without database connection (CSV-only)
-python run_agent.py --keywords "Software Engineer" --location "Sri Lanka" --max-jobs 10 --no-db --csv-filename "jobs.csv"
+# Gather data from LinkedIn only
+python run_agent.py --sources linkedin --keywords "Data Scientist" --location "Sri Lanka" --max-jobs 20
+
+# Offline standalone mode (CSV-only, no database required)
+python run_agent.py --sources linkedin topjobs --keywords "Python Developer" --max-jobs 10 --no-db --csv-filename "jobs.csv"
 ```
 
 #### Option B: REST API Deployment
 Deploy the agent dynamically through the FastAPI endpoint:
 
 ```bash
-# 1. Deploy autonomous agent asynchronously in the background
+# 1. Deploy autonomous agent across both portals in the background
 curl -X POST http://localhost:5000/api/forecast/jobs/collect \
   -H "Content-Type: application/json" \
   -d '{
+    "sources": ["LinkedIn", "TopJobs"],
     "keywords": "Software Engineer",
     "location": "sri lanka",
     "max_jobs": 50,
+    "fetch_full_description": true,
+    "similarity_threshold": 0.85,
     "background": true
   }'
 
-# 2. Check telemetry and status of the agent run
+# 2. Check telemetry, progress, and deduplication status of the agent run
 curl -X GET http://localhost:5000/api/forecast/agent/runs/{run_id}
 
-# 3. Query collected jobs from the database
-curl -X GET "http://localhost:5000/api/forecast/jobs?keyword=Software&location=Colombo&page=1&page_size=20"
+# 3. Query collected jobs from the database (filtered by keyword, location, or source)
+curl -X GET "http://localhost:5000/api/forecast/jobs?keyword=Software&source=TopJobs&page=1&page_size=20"
 
-# 4. View aggregated collection stats
+# 4. View aggregated collection stats and platform breakdown
 curl -X GET http://localhost:5000/api/forecast/jobs/stats
 ```
+
 
 ---
 

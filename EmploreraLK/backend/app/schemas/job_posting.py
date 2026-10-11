@@ -31,6 +31,10 @@ class JobPostingResponse(JobPostingBase):
 
 
 class AgentCollectionGoal(BaseModel):
+    sources: List[str] = Field(
+        default=["LinkedIn", "TopJobs"],
+        description="Target job portals: ['LinkedIn', 'TopJobs']"
+    )
     keywords: str = Field(
         default="Information Technology",
         description="Search keyword or role title to scrape"
@@ -43,7 +47,17 @@ class AgentCollectionGoal(BaseModel):
         default=50,
         ge=1,
         le=500,
-        description="Target number of job postings to collect"
+        description="Target total number of unique job postings to collect"
+    )
+    fetch_full_description: bool = Field(
+        default=True,
+        description="Extract full job description text from job detail pages"
+    )
+    similarity_threshold: float = Field(
+        default=0.85,
+        ge=0.5,
+        le=1.0,
+        description="Fuzzy matching threshold to detect and deduplicate cross-platform job posts"
     )
     min_delay: float = Field(
         default=2.0,
@@ -71,19 +85,21 @@ class AgentCollectionGoal(BaseModel):
 
 class AgentRunStatus(BaseModel):
     run_id: str
-    source: str = "LinkedIn"
+    source: str = "LinkedIn,TopJobs"
     status: str
     target_keywords: str
     target_location: str
     target_count: int
     collected_count: int
     duplicate_count: int
+    cross_platform_duplicates_merged: int = 0
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     execution_summary: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 
 class JobListResponse(BaseModel):

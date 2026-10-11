@@ -21,7 +21,7 @@ logger = logging.getLogger("run_agent")
 
 def main():
     parser = argparse.ArgumentParser(
-        description="EmploreraLK Autonomous LinkedIn Job Data Collection Agent"
+        description="EmploreraLK Autonomous Multi-Platform (LinkedIn & TopJobs.lk) Job Data Collection Agent"
     )
     parser.add_argument(
         "--keywords",
@@ -36,22 +36,40 @@ def main():
         help="Target location (default: 'sri lanka')"
     )
     parser.add_argument(
+        "--sources",
+        nargs="+",
+        default=["linkedin", "topjobs"],
+        help="Target portals: 'linkedin', 'topjobs', or both (default: linkedin topjobs)"
+    )
+    parser.add_argument(
         "--max-jobs",
         type=int,
-        default=50,
-        help="Maximum jobs to collect (default: 50)"
+        default=25,
+        help="Maximum unique jobs to collect (default: 25)"
+    )
+    parser.add_argument(
+        "--no-descriptions",
+        action="store_true",
+        default=False,
+        help="Skip fetching full job description text from detail pages"
+    )
+    parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.85,
+        help="Fuzzy matching threshold (0.5 - 1.0) for cross-platform deduplication (default: 0.85)"
     )
     parser.add_argument(
         "--min-delay",
         type=float,
-        default=2.0,
-        help="Minimum polite delay between requests in seconds (default: 2.0)"
+        default=1.5,
+        help="Minimum polite delay between requests in seconds (default: 1.5)"
     )
     parser.add_argument(
         "--max-delay",
         type=float,
-        default=4.5,
-        help="Maximum polite delay between requests in seconds (default: 4.5)"
+        default=3.5,
+        help="Maximum polite delay between requests in seconds (default: 3.5)"
     )
     parser.add_argument(
         "--export-csv",
@@ -63,7 +81,7 @@ def main():
         "--csv-filename",
         type=str,
         default=None,
-        help="Custom CSV export path (default: linkedin_jobs_<timestamp>.csv)"
+        help="Custom CSV export path (default: emploreralk_jobs_<timestamp>.csv)"
     )
     parser.add_argument(
         "--no-db",
@@ -74,10 +92,28 @@ def main():
 
     args = parser.parse_args()
 
+    # Normalize sources
+    raw_sources = args.sources
+    clean_sources = []
+    for s in raw_sources:
+        s_lower = s.lower()
+        if "top" in s_lower:
+            clean_sources.append("TopJobs")
+        elif "link" in s_lower:
+            clean_sources.append("LinkedIn")
+        elif s_lower == "all":
+            clean_sources = ["LinkedIn", "TopJobs"]
+            break
+        else:
+            clean_sources.append(s)
+
     goal = AgentCollectionGoal(
+        sources=clean_sources,
         keywords=args.keywords,
         location=args.location,
         max_jobs=args.max_jobs,
+        fetch_full_description=not args.no_descriptions,
+        similarity_threshold=args.similarity_threshold,
         min_delay=args.min_delay,
         max_delay=args.max_delay,
         export_csv=args.export_csv,
@@ -88,38 +124,40 @@ def main():
     db_session = None
     if not args.no_db:
         try:
-            logger.info("Initializing database connection...")
+            logger.info("Connecting to Neon PostgreSQL database...")
             Base.metadata.create_all(bind=engine)
             db_session = SessionLocal()
             logger.info("Database connection established.")
         except Exception as e:
-            logger.warning("Could not establish database connection (%s). Operating in standalone memory mode.", e)
+            logger.warning("Database unavailable (%s). Falling back to standalone memory mode.", e)
 
     try:
         logger.info(
-            "Starting Autonomous Data Collection Agent for: keywords='%s', location='%s', max_jobs=%d",
-            goal.keywords, goal.location, goal.max_jobs
+            "Deploying Autonomous Multi-Platform Agent for portals: %s | Query: '%s' | Target: %d unique jobs",
+            ", ".join(goal.sources), goal.keywords, goal.max_jobs
         )
         agent = LinkedInDataCollectionAgent(db=db_session)
         report = agent.execute_goal(goal)
 
-        print("\n" + "=" * 60)
-        print(" autonomous agent execution summary ".center(60, "="))
-        print("=" * 60)
-        print(f"Run ID:             {report.run_id}")
-        print(f"Target Keywords:    {report.goal_keywords}")
-        print(f"Target Location:    {report.goal_location}")
-        print(f"Target Count:       {report.target_count}")
-        print(f"Jobs Collected:     {report.jobs_collected}")
-        print(f"New Saved to DB:    {report.new_saved_count}")
-        print(f"Duplicates Skipped: {report.duplicates_skipped}")
-        print(f"Requests Made:      {report.requests_made}")
-        print(f"Rate Limit Events:  {report.rate_limit_events}")
-        print(f"Status:             {report.status}")
-        print(f"Duration:           {report.duration_seconds}s")
-        print("=" * 60)
-        print(f"Telemetry steps recorded: {len(report.telemetry_trace)}")
-        print("=" * 60 + "\n")
+        print("\n" + "=" * 65)
+        print(" AUTONOMOUS MULTI-PLATFORM AGENT EXECUTION SUMMARY ".center(65, "="))
+        print("=" * 65)
+        print(f"Run ID:                           {report.run_id}")
+        print(f"Portals Harvested:                {', '.join(report.sources_scraped)}")
+        print(f"Target Keywords:                  {report.goal_keywords}")
+        print(f"Target Location:                  {report.goal_location}")
+        print(f"Target Quota:                     {report.target_count}")
+        print(f"Unique Jobs Collected:            {report.jobs_collected}")
+        print(f"New Saved to Database:            {report.new_saved_count}")
+        print(f"Exact / Intra-Portal Duplicates:  {report.duplicates_skipped}")
+        print(f"Cross-Platform Duplicates Merged: {report.cross_platform_duplicates_merged}")
+        print(f"Total HTTP Requests Made:         {report.requests_made}")
+        print(f"Rate Limit Cooldown Events:       {report.rate_limit_events}")
+        print(f"Final Status:                     {report.status}")
+        print(f"Execution Duration:               {report.duration_seconds}s")
+        print("=" * 65)
+        print(f"Telemetry steps logged:           {len(report.telemetry_trace)}")
+        print("=" * 65 + "\n")
 
     finally:
         if db_session:

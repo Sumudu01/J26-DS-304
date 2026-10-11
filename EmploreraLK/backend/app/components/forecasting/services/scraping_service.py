@@ -42,6 +42,7 @@ class ScrapingService:
                 "status": report.status,
                 "collected_count": report.jobs_collected,
                 "duplicate_count": report.duplicates_skipped,
+                "cross_platform_duplicates_merged": report.cross_platform_duplicates_merged,
                 "report": report.to_dict(),
             }
             logger.info("Background agent run %s completed with status: %s", run_id, report.status)
@@ -61,20 +62,20 @@ class ScrapingService:
         db: Session
     ) -> AgentRunStatus:
         """
-        Trigger an autonomous agent data collection session.
+        Trigger an autonomous agent data collection session across LinkedIn & TopJobs.
         If goal.background is True, starts a background thread and returns immediately.
         Otherwise executes synchronously.
         """
+        sources_label = ",".join(goal.sources) if goal.sources else "LinkedIn,TopJobs"
         run_id = f"run_{int(time.time())}_{goal.keywords[:4].lower().replace(' ', '_')}"
 
         if goal.background:
-            # Register in active runs
             _ACTIVE_RUNS[run_id] = {
                 "status": "running",
                 "collected_count": 0,
                 "duplicate_count": 0,
+                "cross_platform_duplicates_merged": 0,
             }
-            # Launch thread
             thread = threading.Thread(
                 target=cls.run_agent_in_background,
                 args=(run_id, goal),
@@ -84,32 +85,34 @@ class ScrapingService:
 
             return AgentRunStatus(
                 run_id=run_id,
-                source="LinkedIn",
+                source=sources_label,
                 status="running",
                 target_keywords=goal.keywords,
                 target_location=goal.location,
                 target_count=goal.max_jobs,
                 collected_count=0,
                 duplicate_count=0,
-                execution_summary={"message": "Agent running autonomously in background"}
+                cross_platform_duplicates_merged=0,
+                execution_summary={"message": f"Agent running autonomously in background across {sources_label}"}
             )
         else:
-            # Synchronous execution
             agent = LinkedInDataCollectionAgent(db=db)
             report: AgentExecutionReport = agent.execute_goal(goal, run_id=run_id)
 
             return AgentRunStatus(
                 run_id=run_id,
-                source="LinkedIn",
+                source=",".join(report.sources_scraped) if report.sources_scraped else sources_label,
                 status=report.status,
                 target_keywords=goal.keywords,
                 target_location=goal.location,
                 target_count=goal.max_jobs,
                 collected_count=report.jobs_collected,
                 duplicate_count=report.duplicates_skipped,
+                cross_platform_duplicates_merged=report.cross_platform_duplicates_merged,
                 execution_summary=report.to_dict(),
                 error_message=report.error
             )
+
 
     @classmethod
     def get_run_status(cls, run_id: str, db: Session) -> Optional[AgentRunStatus]:
@@ -183,6 +186,7 @@ class ScrapingService:
         keyword: Optional[str] = None,
         location: Optional[str] = None,
         company: Optional[str] = None,
+        source: Optional[str] = None,
         page: int = 1,
         page_size: int = 25
     ) -> JobListResponse:
@@ -195,6 +199,7 @@ class ScrapingService:
                 or_(
                     JobPosting.title.ilike(term),
                     JobPosting.search_keyword.ilike(term),
+                    JobPosting.description_raw.ilike(term),
                 )
             )
 
@@ -203,6 +208,9 @@ class ScrapingService:
 
         if company:
             query = query.filter(JobPosting.company.ilike(f"%{company.strip()}%"))
+
+        if source:
+            query = query.filter(JobPosting.source.ilike(f"%{source.strip()}%"))
 
         total = query.count()
         offset = (page - 1) * page_size
@@ -229,6 +237,20 @@ class ScrapingService:
         # Unique companies count
         unique_companies = db.query(func.count(func.distinct(JobPosting.company))).scalar() or 0
 
+        # Breakdown by platform source
+        source_counts = (
+            db.query(JobPosting.source, func.count(JobPosting.id))
+            .group_by(JobPosting.source)
+            .all()
+        )
+
+        # Count of postings with complete descriptions
+        jobs_with_descriptions = (
+            db.query(func.count(JobPosting.id))
+            .filter(JobPosting.description_raw.isnot(None), JobPosting.description_raw != "")
+            .scalar() or 0
+        )
+
         # Top keywords scraped
         keyword_counts = (
             db.query(JobPosting.search_keyword, func.count(JobPosting.id))
@@ -240,8 +262,11 @@ class ScrapingService:
 
         return {
             "total_jobs_collected": total_jobs,
+            "jobs_with_full_descriptions": jobs_with_descriptions,
             "unique_companies": unique_companies,
             "total_agent_runs": total_runs,
+            "platform_breakdown": {s or "Unknown": count for s, count in source_counts},
             "top_keywords": [{"keyword": k or "unspecified", "count": c} for k, c in keyword_counts],
             "forecasting_pipeline_status": "ready" if total_jobs > 0 else "awaiting_data",
         }
+
