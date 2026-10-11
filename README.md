@@ -52,7 +52,7 @@ J26-DS-304/
     │   │   │   └── v1/
     │   │   │       ├── auth.py              # JWT Sign up, Login & OAuth2 (Google/LinkedIn)
     │   │   │       ├── profile.py           # Seeker & Recruiter profile endpoints
-    │   │   │       ├── forecast.py          # Data Collection, NLP Extraction & Forecasting routes
+    │   │   │       ├── forecast.py          # Data Collection, NLP Extraction, Skill Processing & Forecasting routes
     │   │   │       ├── career_path.py       # Career pathway endpoints
     │   │   │       ├── skill_gap.py         # Skill gap discovery endpoints
     │   │   │       └── matching.py          # Candidate-to-job matching endpoints
@@ -61,11 +61,12 @@ J26-DS-304/
     │   │   │   │   ├── agents/
     │   │   │   │   │   ├── data_collection_agent.py   # Autonomous Multi-Platform Data Collection Agent
     │   │   │   │   │   ├── nlp_extraction_agent.py    # Autonomous NLP Skill & Metadata Extraction Agent
-    │   │   │   │   │   ├── skill_processing_agent.py  # Taxonomy Normalizer
+    │   │   │   │   │   ├── skill_processing_agent.py  # Autonomous Skill Processing & Normalization Agent
     │   │   │   │   │   └── insight_generation_agent.py # Forecast Explainer
     │   │   │   │   ├── services/
     │   │   │   │   │   ├── scraping_service.py        # Background collection manager
     │   │   │   │   │   ├── nlp_service.py             # NLP extraction orchestration & telemetry
+    │   │   │   │   │   ├── skill_processing_service.py # Skill normalization, ontology & co-occurrence service
     │   │   │   │   │   └── forecasting_service.py     # Time-series model inference service
     │   │   │   │   └── models/
     │   │   │   │       ├── arima_model.py
@@ -81,15 +82,17 @@ J26-DS-304/
     │   │   │   └── security.py              # JWT tokens & Passlib password hashing
     │   │   ├── models/                      # SQLAlchemy Database Entities
     │   │   │   ├── user.py                  # User authentication & profile table
-    │   │   │   └── job_posting.py           # Job postings, Collection runs & NLP runs tables
+    │   │   │   └── job_posting.py           # Job postings, Collection, NLP & Skill processing runs tables
     │   │   ├── schemas/                     # Pydantic Validation Schemas
     │   │   │   ├── auth.py                  # Auth request & response schemas
     │   │   │   ├── job_posting.py           # Job posting & Agent goal/telemetry schemas
-    │   │   │   └── nlp_extraction.py        # NLP Goal, Run Status & Skill Item schemas
+    │   │   │   ├── nlp_extraction.py        # NLP Goal, Run Status & Skill Item schemas
+    │   │   │   └── skill_processing.py      # Normalization, Ontology & Co-occurrence schemas
     │   │   ├── utils/                       # Common utilities & helpers
     │   │   └── main.py                      # FastAPI application entrypoint & lifespan
     │   ├── run_agent.py                     # Standalone CLI runner for Data Collection Agent
     │   ├── run_nlp_agent.py                 # Standalone CLI runner for NLP Extraction Agent
+    │   ├── run_skill_agent.py               # Standalone CLI runner for Skill Processing Agent
     │   ├── requirements.txt                 # Backend Python dependencies
     │   └── .env.example                     # Environment variables template
     ├── frontend/                            # React 18 + Vite + TypeScript Frontend
@@ -287,9 +290,79 @@ The agent combines statistical Named Entity Recognition with deterministic taxon
 
 ---
 
+## ⚙️ Autonomous Skill Processing Agent (Component 1)
+
+The **Skill Processing Agent** ([`skill_processing_agent.py`](file:///e:/Sliit/Y4/RP/J26-DS-304/EmploreraLK/backend/app/components/forecasting/agents/skill_processing_agent.py)) is an autonomous AI agent engineered to normalize noisy, fragmented skill tokens into canonical ontology representations, perform typo tolerance, deduce implicit parent competencies, score skill importance, and generate skill co-occurrence cluster networks for demand forecasting.
+
+### 🔬 6 Automated Skill Processing Techniques
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│               RAW EXTRACTED SKILLS & JOB ADVERTISEMENT TITLE           │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  1. Multi-Level Canonical Aliasing & Standardization   │
+        │  Maps 87+ canonical IT skills across 6 domains and     │
+        │  14 categories. Resolves variants (e.g., 'react.js',   │
+        │  'reactjs', 'react js' -> 'React').                    │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  2. Fuzzy String Matching & Typo Tolerance             │
+        │  Applies SequenceMatcher token similarity (>= 0.85)    │
+        │  to correct misspellings (e.g. 'pyhton' -> 'Python',    │
+        │  'dockr' -> 'Docker', 'postgress' -> 'PostgreSQL').     │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  3. Ontological Implication Deduction                 │
+        │  Deduces implied competencies from specialized tools:  │
+        │  • FastAPI / Django -> Python, RESTful APIs, Backend   │
+        │  • React / Angular  -> JavaScript, Frontend Development│
+        │  • Kubernetes       -> Docker, Container Orchestration │
+        │  • PyTorch          -> Deep Learning, Machine Learning │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  4. Position-Based Importance Weighting (Core Skills)   │
+        │  • Title Boost: 2.0x weight & flagged as Core Skill.   │
+        │  • Body mentions: 1.0x weight.                         │
+        │  • Implied competencies: 0.6x weight.                  │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  5. Hierarchical Taxonomy Classification               │
+        │  Classifies into Domain -> Category -> Subcategory     │
+        │  (e.g., Software Engineering -> Web Frameworks).       │
+        └──────────────────────────┬─────────────────────────────┘
+                                   │
+                                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  6. Co-occurrence Network & Clustering Matrix          │
+        │  Computes pairwise co-occurrence frequencies across    │
+        │  jobs to discover skill bundles and affinities.        │
+        └────────────────────────────────────────────────────────┘
+```
+
+### 🏷️ 6 Taxonomy Domains & 14 Categories
+1. **Software Engineering:** Programming Languages (19), Frontend Frameworks & UI (8), Backend Frameworks (10), Architecture & Methodologies (6).
+2. **Cloud & DevOps:** Cloud Infrastructure (3), Containerization & Orchestration (2), CI/CD & Infrastructure as Code (5).
+3. **Data Science & AI:** Machine Learning & AI (9), Data Engineering & Analytics (4).
+4. **Databases & Storage:** Relational Databases (4), NoSQL & In-Memory (3).
+5. **Quality Assurance & Testing:** Software Testing & Automation (8).
+6. **Methodologies & Professional Skills:** Methodologies & Process (2), Soft Skills (4).
+
+---
+
 ## 📝 API Endpoints Specification
 
-### 1. Autonomous Data Collection, NLP Extraction & Forecasting (Component 1)
+### 1. Autonomous Data Collection, NLP Extraction, Skill Processing & Forecasting (Component 1)
 | Method | Endpoint | Description |
 |:---|:---|:---|
 | `POST` | `/api/forecast/jobs/collect` | Deploy the autonomous agent to collect live jobs (sync or async background) |
@@ -302,6 +375,12 @@ The agent combines statistical Named Entity Recognition with deterministic taxon
 | `GET` | `/api/forecast/nlp/runs` | List recent autonomous NLP extraction agent runs |
 | `GET` | `/api/forecast/nlp/runs/{run_id}` | Retrieve telemetry and metrics for a specific NLP extraction run |
 | `GET` | `/api/forecast/nlp/skills/distribution` | Retrieve top in-demand skills and category distribution breakdown |
+| `POST` | `/api/forecast/skills/process` | Deploy Skill Processing Agent over database jobs (batch or background) |
+| `POST` | `/api/forecast/skills/normalize` | Normalize raw skills array (ad-hoc) with fuzzy typo matching & ontology deduction |
+| `GET` | `/api/forecast/skills/runs` | List Skill Processing Agent execution runs |
+| `GET` | `/api/forecast/skills/runs/{run_id}` | Retrieve execution report and telemetry trace for a specific skill run |
+| `GET` | `/api/forecast/skills/taxonomy` | Retrieve full multi-tier hierarchical taxonomy tree |
+| `GET` | `/api/forecast/skills/co-occurrences/{skill_name}` | Discover co-occurring skill clusters for a target technology |
 | `GET` | `/api/v1/forecast/skills` | Retrieve longitudinal demand forecast for specified skills |
 | `GET` | `/api/v1/forecast/emerging` | Identify emerging high-growth technologies |
 | `GET` | `/api/v1/forecast/occupation/{id}` | Forecast aggregate demand for a specific job title |
@@ -373,6 +452,8 @@ The agent combines statistical Named Entity Recognition with deterministic taxon
 - `seniority_level` (String 50: `intern`, `junior`, `mid`, `senior`, `lead`, `manager`)
 - `experience_years_min` (Integer, Nullable)
 - `education_level` (String 100, Nullable)
+- `skills_processed` (Text JSON dictionary with canonical skills, weights, implied competencies, and categories)
+- `processed_at` (DateTime UTC with timezone, Nullable)
 - `raw_metadata` (Text JSON dictionary)
 - `created_at`, `updated_at` (Timestamps with timezone)
 
@@ -398,6 +479,17 @@ The agent combines statistical Named Entity Recognition with deterministic taxon
 - `unique_skills_count` (Integer)
 - `status` (String 50: `running`, `completed`, `partial`, `failed`)
 - `execution_summary` (Text JSON with extraction telemetry trace)
+- `error_message` (Text, Nullable)
+- `started_at`, `completed_at` (Timestamps with timezone)
+
+#### 5. `skill_processing_runs`
+- `id` (Integer, PK)
+- `run_id` (String 64, Unique, Indexed)
+- `total_processed` (Integer)
+- `skills_normalized_count` (Integer)
+- `unique_canonical_skills_count` (Integer)
+- `status` (String 50: `pending`, `running`, `completed`, `failed`)
+- `execution_summary` (Text JSON with telemetry, domain distribution, and co-occurrence pairs)
 - `error_message` (Text, Nullable)
 - `started_at`, `completed_at` (Timestamps with timezone)
 
@@ -555,7 +647,67 @@ curl -X GET "http://localhost:5000/api/forecast/nlp/skills/distribution?limit=20
 
 ---
 
-### 4. Frontend Setup
+### 4. Running the Autonomous Skill Processing Agent
+
+#### Option A: Standalone CLI Runner (`run_skill_agent.py`)
+Run the autonomous skill normalizer directly from the command line:
+
+```bash
+# 1. Process and normalize pending job postings from the database
+python run_skill_agent.py --batch-size 25
+
+# 2. Force re-processing across all job postings in the database
+python run_skill_agent.py --batch-size 50 --force-reprocess
+
+# 3. Test ad-hoc normalization on noisy tokens with context title boost
+python run_skill_agent.py --test-skills pyhton "react js" k8s postgress fastapi dockr \
+  --test-title "Senior Python & Cloud Architect"
+
+# 4. Query co-occurring skill cluster relationships for a target skill
+python run_skill_agent.py --query-cooccurrence Python
+
+# 5. Display hierarchical taxonomy tree breakdown
+python run_skill_agent.py --show-taxonomy
+```
+
+#### Option B: REST API Deployment
+Deploy the Skill Processing Agent dynamically via FastAPI endpoints:
+
+```bash
+# 1. Trigger automated skill processing on database jobs (sync or async background)
+curl -X POST http://localhost:5000/api/forecast/skills/process \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch_size": 25,
+    "force_reprocess": false,
+    "fuzzy_threshold": 0.85,
+    "enable_implication": true,
+    "background": true
+  }'
+
+# 2. Normalize an arbitrary skills array on demand
+curl -X POST http://localhost:5000/api/forecast/skills/normalize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skills": ["pyhton", "react js", "k8s", "postgress"],
+    "job_title": "Senior Python Architect",
+    "fuzzy_threshold": 0.85,
+    "enable_implication": true
+  }'
+
+# 3. Check status and telemetry of a skill processing run
+curl -X GET http://localhost:5000/api/forecast/skills/runs/{run_id}
+
+# 4. Retrieve complete multi-tier hierarchical taxonomy tree
+curl -X GET http://localhost:5000/api/forecast/skills/taxonomy
+
+# 5. Query top co-occurring skills and cluster affinity for a technology
+curl -X GET "http://localhost:5000/api/forecast/skills/co-occurrences/Python?limit=15"
+```
+
+---
+
+### 5. Frontend Setup
 
 ```bash
 cd J26-DS-304/EmploreraLK/frontend

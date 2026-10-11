@@ -34,6 +34,10 @@ class JobPosting(Base):
     experience_years_min = Column(Integer, nullable=True)  # Minimum years of experience required
     education_level = Column(String(100), nullable=True)  # Bachelor's, Master's, etc.
 
+    # Normalized & Processed Skill Attributes (Skill Processing Agent)
+    skills_processed = Column(Text, nullable=True)  # JSON-serialized structured skill metadata & hierarchy
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -69,6 +73,25 @@ class JobPosting(Base):
             self.skills_extracted = json.dumps(clean)
         else:
             self.skills_extracted = json.dumps([])
+
+    def get_processed_skills(self) -> Dict[str, Any]:
+        """Safely deserialize normalized skills metadata dictionary."""
+        if not self.skills_processed:
+            return {}
+        try:
+            parsed = json.loads(self.skills_processed)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        return {}
+
+    def set_processed_skills(self, data: Dict[str, Any]) -> None:
+        """Serialize normalized skills metadata dictionary."""
+        if isinstance(data, dict):
+            self.skills_processed = json.dumps(data)
+        else:
+            self.skills_processed = json.dumps({})
 
 
 
@@ -132,4 +155,35 @@ class NLPExtractionRun(Base):
 
     def set_summary(self, data: Dict[str, Any]) -> None:
         self.execution_summary = json.dumps(data)
+
+
+class SkillProcessingRun(Base):
+    """
+    SQLAlchemy Model tracking autonomous Skill Processing Agent runs,
+    telemetry, normalization metrics, and taxonomy coverage.
+    """
+    __tablename__ = "skill_processing_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(64), unique=True, index=True, nullable=False)
+    total_processed = Column(Integer, default=0)
+    skills_normalized_count = Column(Integer, default=0)
+    unique_canonical_skills_count = Column(Integer, default=0)
+    status = Column(String(50), default="completed", nullable=False)  # pending, running, completed, failed
+    execution_summary = Column(Text, nullable=True)  # JSON-serialized telemetry & metrics
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def get_summary(self) -> Dict[str, Any]:
+        if not self.execution_summary:
+            return {}
+        try:
+            return json.loads(self.execution_summary)
+        except Exception:
+            return {}
+
+    def set_summary(self, data: Dict[str, Any]) -> None:
+        self.execution_summary = json.dumps(data)
+
 

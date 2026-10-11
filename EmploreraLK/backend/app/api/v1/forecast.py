@@ -200,3 +200,123 @@ def get_skill_distribution(
 ) -> Dict[str, Any]:
     return NLPService.get_global_skill_distribution(db=db, limit=limit)
 
+
+# ─── Skill Processing & Normalization Agent Endpoints ────────────────────────
+
+from app.schemas.skill_processing import (
+    SkillProcessingGoal,
+    SkillProcessingRunStatus,
+    AdHocSkillNormalizationRequest,
+    AdHocSkillNormalizationResponse,
+    SkillCoOccurrenceResponse,
+    TaxonomyTreeResponse,
+)
+from app.components.forecasting.services.skill_processing_service import SkillProcessingService
+
+
+@router.post(
+    "/skills/process",
+    response_model=SkillProcessingRunStatus,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger Autonomous Skill Processing & Normalization Agent",
+    description=(
+        "Deploys the Skill Processing Agent to normalize raw skill mentions, resolve typos, "
+        "apply title importance weighting, deduce ontological implications, and classify into multi-tier taxonomies."
+    )
+)
+def trigger_skill_processing(
+    goal: SkillProcessingGoal,
+    db: Session = Depends(get_db)
+) -> SkillProcessingRunStatus:
+    try:
+        return SkillProcessingService.trigger_processing(goal=goal, db=db)
+    except Exception as e:
+        logger.error("Error deploying Skill Processing Agent: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Skill processing agent deployment failed: {str(e)}"
+        )
+
+
+@router.post(
+    "/skills/normalize",
+    response_model=AdHocSkillNormalizationResponse,
+    summary="Normalize Raw Skills Array (Ad-Hoc)",
+    description=(
+        "Normalizes an arbitrary list of skill strings into canonical representations with "
+        "typo tolerance, hierarchical taxonomy placement, and optional ontological implication deduction."
+    )
+)
+def normalize_skills_adhoc(
+    payload: AdHocSkillNormalizationRequest
+) -> AdHocSkillNormalizationResponse:
+    try:
+        return SkillProcessingService.normalize_adhoc_skills(payload=payload)
+    except Exception as e:
+        logger.error("Error normalizing skills: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Skill normalization failed: {str(e)}"
+        )
+
+
+@router.get(
+    "/skills/runs",
+    response_model=List[SkillProcessingRunStatus],
+    summary="List Skill Processing Agent Runs",
+    description="Retrieve the execution history of autonomous skill processing and normalization agent runs."
+)
+def list_skill_processing_runs(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+) -> List[SkillProcessingRunStatus]:
+    return SkillProcessingService.get_all_runs(db=db, limit=limit)
+
+
+@router.get(
+    "/skills/runs/{run_id}",
+    response_model=SkillProcessingRunStatus,
+    summary="Get Skill Processing Run Status",
+    description="Retrieve execution report, telemetry steps, and normalized skill metrics for a specific agent run."
+)
+def get_skill_processing_run_status(
+    run_id: str,
+    db: Session = Depends(get_db)
+) -> SkillProcessingRunStatus:
+    status_info = SkillProcessingService.get_run_status(run_id=run_id, db=db)
+    if not status_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill processing run '{run_id}' not found."
+        )
+    return status_info
+
+
+@router.get(
+    "/skills/taxonomy",
+    response_model=TaxonomyTreeResponse,
+    summary="Hierarchical IT Skill Taxonomy Tree",
+    description="Retrieve the complete multi-tier taxonomy tree across all domains, categories, canonical skills, and aliases."
+)
+def get_taxonomy_tree() -> TaxonomyTreeResponse:
+    return SkillProcessingService.get_taxonomy_tree()
+
+
+@router.get(
+    "/skills/co-occurrences/{skill_name}",
+    response_model=SkillCoOccurrenceResponse,
+    summary="Skill Co-occurrence Network & Clusters",
+    description="Discover the most frequently co-occurring skills and cluster relationships for a given target skill."
+)
+def get_skill_co_occurrences(
+    skill_name: str,
+    limit: int = Query(15, ge=1, le=50),
+    db: Session = Depends(get_db)
+) -> SkillCoOccurrenceResponse:
+    return SkillProcessingService.get_skill_co_occurrences(
+        skill_name=skill_name,
+        db=db,
+        limit=limit
+    )
+
+

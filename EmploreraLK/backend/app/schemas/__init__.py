@@ -24,6 +24,18 @@ from app.schemas.nlp_extraction import (
     TextSkillExtractionResponse,
 )
 
+from app.schemas.skill_processing import (
+    NormalizedSkillItem,
+    JobSkillProcessingResult,
+    SkillProcessingGoal,
+    SkillProcessingRunStatus,
+    AdHocSkillNormalizationRequest,
+    AdHocSkillNormalizationResponse,
+    SkillCoOccurrenceItem,
+    SkillCoOccurrenceResponse,
+    TaxonomyTreeResponse,
+)
+
 __all__ = [
     "SignupRequest",
     "LoginRequest",
@@ -43,6 +55,15 @@ __all__ = [
     "NLPExtractionRunStatus",
     "TextSkillExtractionRequest",
     "TextSkillExtractionResponse",
+    "NormalizedSkillItem",
+    "JobSkillProcessingResult",
+    "SkillProcessingGoal",
+    "SkillProcessingRunStatus",
+    "AdHocSkillNormalizationRequest",
+    "AdHocSkillNormalizationResponse",
+    "SkillCoOccurrenceItem",
+    "SkillCoOccurrenceResponse",
+    "TaxonomyTreeResponse",
 ]
 
 
