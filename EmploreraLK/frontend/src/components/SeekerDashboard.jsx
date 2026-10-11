@@ -584,9 +584,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       {/* ── MAIN PANEL ── */}
       <main className="flex-1 flex flex-col bg-gray-50 min-w-0">
         {/* Top header bar */}
-        <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 shrink-0 flex items-center justify-between relative">
+        <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0 flex items-center justify-between gap-2 relative min-w-0">
           {/* Left – page title */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 min-w-0">
             <button 
               onClick={() => setIsSidebarOpen(true)} 
               className="md:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg"
@@ -610,7 +610,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           </div>
 
           {/* Right – Notification bell & Logout */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4 shrink-0">
             <div className="relative" ref={notifRef}>
               <button
                 onClick={() => setShowNotifications(prev => !prev)}
@@ -714,64 +714,66 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
           >
             <LogOut className="h-4 w-4 shrink-0" />
-            <span>Logout</span>
+            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
       </header>
 
         {/* Tab Contents */}
-        <section className="flex-1 p-6 overflow-y-auto">
+        <section className="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto overflow-x-hidden">
           {/* TAB 1: MARKET DEMAND FORECASTING */}
           {activeTab === 'demand' && (
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6 max-w-full">
 
               {/* ── SEARCH SKILL / JOB DEMAND ── */}
-              <div className="bg-gradient-to-br from-brand/[0.03] via-white to-blue-50/50 p-6 rounded-xl border border-brand/10 shadow-sm">
-                <div className="flex items-center space-x-2 mb-4">
-                  <div className="p-2 bg-brand/10 rounded-lg">
+              <div className="bg-gradient-to-br from-brand/[0.03] via-white to-blue-50/50 p-4 sm:p-6 rounded-xl border border-brand/10 shadow-sm">
+                <div className="flex items-start sm:items-center space-x-2 mb-4">
+                  <div className="p-2 bg-brand/10 rounded-lg shrink-0">
                     <Search className="h-4 w-4 text-brand" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <h2 className="text-base font-bold text-gray-900">Search Jobs or Skills</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                       Use any job title, skill, or keyword — results apply to both Live Job Listings and Future Job Market Demand Forecasting
                     </p>
                   </div>
                 </div>
 
                 {/* Search Input */}
-                <form onSubmit={searchSkillDemand} className="flex items-center gap-3">
-                  <div className="relative flex-1">
+                <form onSubmit={searchSkillDemand} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                  <div className="relative flex-1 min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder='Try "AI Engineer", "Python", "AWS", "Data Analyst"...'
+                      placeholder='Try "AI Engineer", "Python", "AWS"...'
                       className="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand/40 outline-none transition-all placeholder:text-gray-400"
                     />
                   </div>
-                  <button
-                    type="submit"
-                    disabled={searchLoading}
-                    className="px-5 py-2.5 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-50 flex items-center space-x-1.5"
-                  >
-                    {searchLoading ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                    <span>{searchLoading ? 'Searching...' : 'Search'}</span>
-                  </button>
-                  {hasSearched && (
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
-                      type="button"
-                      onClick={clearSearch}
-                      className="px-3 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+                      type="submit"
+                      disabled={searchLoading}
+                      className="flex-1 sm:flex-none justify-center px-5 py-2.5 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-50 flex items-center space-x-1.5"
                     >
-                      Clear
+                      {searchLoading ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4" />
+                      )}
+                      <span>{searchLoading ? 'Searching...' : 'Search'}</span>
                     </button>
-                  )}
+                    {hasSearched && (
+                      <button
+                        type="button"
+                        onClick={clearSearch}
+                        className="px-3 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </form>
 
                 {searchError && (
@@ -785,19 +787,17 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                 {searchResult && (
                   <div className="mt-5 space-y-4 animate-in fade-in" style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
                     {/* Result Header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm font-bold text-gray-900">Results for</span>
-                        <span className="px-2.5 py-0.5 bg-brand/10 text-brand text-xs font-bold rounded-full">"{searchResult.query}"</span>
-                        {searchResult.matched_skill_category && (
-                          <span className="text-xs text-gray-400">→ mapped to <span className="font-semibold text-gray-600">{searchResult.matched_skill_category}</span></span>
-                        )}
-                      </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-sm font-bold text-gray-900">Results for</span>
+                      <span className="px-2.5 py-0.5 bg-brand/10 text-brand text-xs font-bold rounded-full break-all">"{searchResult.query}"</span>
+                      {searchResult.matched_skill_category && (
+                        <span className="text-xs text-gray-400">→ mapped to <span className="font-semibold text-gray-600">{searchResult.matched_skill_category}</span></span>
+                      )}
                     </div>
 
                     {/* Metrics Cards Row */}
                     {searchResult.matched_skill_category ? (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
                         {/* Current Demand */}
                         <div className="bg-white rounded-lg border border-gray-100 p-3.5 shadow-sm">
                           <div className="flex items-center space-x-1.5 mb-1.5">
@@ -859,16 +859,17 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                     {/* Trend Mini-Chart */}
                     {(searchResult.trend_timeline || []).length > 0 && (
-                      <div className="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
-                        <h4 className="text-xs font-bold text-gray-700 mb-3 flex items-center space-x-1.5">
-                          <BarChart3 className="h-3.5 w-3.5 text-brand" />
+                      <div className="bg-white rounded-lg border border-gray-100 p-3 sm:p-4 shadow-sm">
+                        <h4 className="text-xs font-bold text-gray-700 mb-3 flex items-start sm:items-center space-x-1.5">
+                          <BarChart3 className="h-3.5 w-3.5 text-brand shrink-0 mt-0.5 sm:mt-0" />
                           <span>Demand Trend for {searchResult.matched_skill_category} (2022 – 2029)</span>
                         </h4>
                         {(() => {
                           const maxVal = 150
                           const barMaxH = 120 // max bar height in px
                           return (
-                            <div className="relative pl-8">
+                            <div className="overflow-x-auto -mx-1 px-1 pb-1">
+                            <div className="relative pl-8 min-w-[420px]">
                               {/* Y-axis labels */}
                               <div className="absolute left-0 top-0 flex flex-col justify-between text-[9px] text-gray-400 font-medium select-none" style={{ height: `${barMaxH}px` }}>
                                 <span>150</span>
@@ -893,7 +894,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                                       {/* Bar */}
                                       <div
                                         style={{ height: `${barH}px` }}
-                                        className={`w-5 md:w-6 rounded-t transition-all duration-500 hover:scale-105 cursor-default ${
+                                        className={`w-4 sm:w-5 md:w-6 rounded-t transition-all duration-500 hover:scale-105 cursor-default ${
                                           point.is_forecast
                                             ? 'bg-gradient-to-t from-brand/30 to-brand/50 border border-dashed border-brand/50'
                                             : 'bg-gradient-to-t from-brand to-brand-light'
@@ -914,9 +915,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                                 ))}
                               </div>
                             </div>
+                            </div>
                           )
                         })()}
-                        <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-gray-400">
+                        <div className="flex items-center justify-center flex-wrap gap-3 sm:gap-4 mt-3 text-[10px] text-gray-400">
                           <div className="flex items-center space-x-1.5"><span className="h-2.5 w-5 rounded bg-gradient-to-t from-brand to-brand-light inline-block"></span><span>Historical</span></div>
                           <div className="flex items-center space-x-1.5"><span className="h-2.5 w-5 rounded bg-brand/40 border border-dashed border-brand/50 inline-block"></span><span>Forecasted</span></div>
                         </div>
@@ -930,7 +932,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           <Layers className="h-3.5 w-3.5 text-orange-500" />
                           <span>Supply vs Demand Gap — {searchResult.supply_demand_gap.skill}</span>
                         </h4>
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-3 gap-2 sm:gap-3">
                           <div className="text-center">
                             <div className="text-lg font-extrabold text-blue-600">{searchResult.supply_demand_gap.demand}%</div>
                             <div className="text-[10px] text-gray-400 font-semibold uppercase">Market Demand</div>
@@ -960,18 +962,18 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         </h4>
                         <div className="space-y-2">
                           {searchResult.related_jobs.map((job, i) => (
-                            <div key={i} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-100 hover:border-brand/20 hover:bg-brand/[0.02] transition-all group">
+                            <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-100 hover:border-brand/20 hover:bg-brand/[0.02] transition-all group">
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-bold text-gray-800 group-hover:text-brand transition-colors truncate">{job.title}</div>
-                                <div className="text-[10px] text-gray-500 flex items-center gap-2 mt-0.5">
+                                <div className="text-[10px] text-gray-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                                   <span>{job.company}</span>
-                                  <span className="text-gray-300">•</span>
-                                  <span className="flex items-center"><MapPin className="h-2.5 w-2.5 mr-0.5" />{job.location}</span>
-                                  <span className="text-gray-300">•</span>
+                                  <span className="text-gray-300 hidden sm:inline">•</span>
+                                  <span className="flex items-center"><MapPin className="h-2.5 w-2.5 mr-0.5 shrink-0" />{job.location}</span>
+                                  <span className="text-gray-300 hidden sm:inline">•</span>
                                   <span className="font-medium text-emerald-600">{job.salary}</span>
                                 </div>
                               </div>
-                              <span className="text-[9px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-semibold shrink-0 ml-2">{job.platform}</span>
+                              <span className="self-start sm:self-center text-[9px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-semibold shrink-0">{job.platform}</span>
                             </div>
                           ))}
                         </div>
@@ -982,34 +984,37 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               </div>
 
               {/* Switch between Live Job Listings and Demand Forecasting */}
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="inline-flex items-center p-1 bg-gray-100 rounded-xl border border-gray-200">
+              <div className="flex items-center justify-between gap-2 sm:gap-3">
+                <div className="flex-1 min-w-0 grid grid-cols-2 p-1 bg-gray-100 rounded-xl border border-gray-200">
                   <button
                     type="button"
                     onClick={() => setDemandSubView('listings')}
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all min-w-0 ${
                       demandSubView === 'listings'
                         ? 'bg-white text-brand shadow-sm'
                         : 'text-gray-500 hover:text-gray-800'
                     }`}
                   >
-                    <Briefcase className="h-4 w-4" />
-                    Live Job Listings
+                    <Briefcase className="h-4 w-4 shrink-0" />
+                    <span className="sm:hidden">Live Jobs</span>
+                    <span className="hidden sm:inline truncate">Live Job Listings</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setDemandSubView('forecast')}
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all min-w-0 ${
                       demandSubView === 'forecast'
                         ? 'bg-white text-brand shadow-sm'
                         : 'text-gray-500 hover:text-gray-800'
                     }`}
                   >
-                    <TrendingUp className="h-4 w-4" />
-                    Future Job Market Demand Forecasting
+                    <TrendingUp className="h-4 w-4 shrink-0" />
+                    <span className="sm:hidden">Forecast</span>
+                    <span className="hidden sm:inline lg:hidden truncate">Demand Forecast</span>
+                    <span className="hidden lg:inline truncate">Future Job Market Demand Forecasting</span>
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setDemandSubView('listings')}
@@ -1036,32 +1041,32 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               {/* ── LIVE JOB LISTINGS FROM AGENTIC PIPELINE ── */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 {/* Section header */}
-                <div className="px-6 py-4 bg-gradient-to-r from-brand/5 to-indigo-50/60 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 bg-brand/10 rounded-lg">
+                <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-brand/5 to-indigo-50/60 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                  <div className="flex items-start sm:items-center space-x-3 min-w-0">
+                    <div className="p-2 bg-brand/10 rounded-lg shrink-0">
                       <Briefcase className="h-4 w-4 text-brand" />
                     </div>
-                    <div>
-                      <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                    <div className="min-w-0">
+                      <h2 className="text-base font-bold text-gray-900 flex flex-wrap items-center gap-2">
                         Live Job Listings
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-full animate-pulse">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block"></span>
                           Real-Time
                         </span>
                       </h2>
-                      <p className="text-xs text-gray-500 mt-0.5">
+                      <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                         Personalized for <span className="font-semibold text-brand">{user.target_role || 'your target role'}</span> — sourced from LinkedIn &amp; TopJobs via AI pipeline
                       </p>
                     </div>
                   </div>
 
                   {/* Controls row */}
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
                     {/* Source filter */}
                     <select
                       value={liveJobsSource}
                       onChange={(e) => { setLiveJobsSource(e.target.value); fetchLiveJobs(1, e.target.value) }}
-                      className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:ring-2 focus:ring-brand/20 outline-none"
+                      className="flex-1 sm:flex-none min-w-0 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:ring-2 focus:ring-brand/20 outline-none"
                     >
                       <option value="">All Sources</option>
                       <option value="LinkedIn">LinkedIn</option>
@@ -1089,15 +1094,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           : 'bg-brand text-white hover:bg-brand-dark shadow-sm'
                       } disabled:opacity-60`}
                     >
-                      <Zap className="h-3.5 w-3.5" />
-                      {pipelineStatus === 'triggered' ? 'Pipeline Running…' : 'Run AI Pipeline'}
+                      <Zap className="h-3.5 w-3.5 shrink-0" />
+                      {pipelineStatus === 'triggered' ? 'Running…' : <><span className="sm:hidden">Pipeline</span><span className="hidden sm:inline">Run AI Pipeline</span></>}
                     </button>
                   </div>
                 </div>
 
                 {/* Pipeline status banner */}
                 {pipelineStatus === 'triggered' && (
-                  <div className="mx-6 mt-4 px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3 text-xs text-blue-700">
+                  <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3 text-xs text-blue-700">
                     <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
                     <div>
                       <p className="font-bold">Autonomous Pipeline Running</p>
@@ -1106,14 +1111,14 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                   </div>
                 )}
                 {pipelineStatus === 'error' && (
-                  <div className="mx-6 mt-4 px-4 py-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-600">
+                  <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-600">
                     <AlertTriangle className="h-4 w-4 shrink-0" />
                     Pipeline trigger failed. Please ensure the backend is running and try again.
                   </div>
                 )}
 
                 {/* Body */}
-                <div className="p-6">
+                <div className="p-4 sm:p-6">
                   {liveJobsLoading && liveJobs.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-gray-400 space-y-3">
                       <RefreshCw className="h-8 w-8 animate-spin text-brand/40" />
@@ -1167,15 +1172,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                   ) : (
                     <>
                       {/* Stats row */}
-                      <div className="flex items-center justify-between mb-4">
-                        <p className="text-xs text-gray-500">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
+                        <p className="text-xs text-gray-500 break-words">
                           <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found for{' '}
                           <span className="font-semibold text-brand">
                             {hasSearched && searchQuery.trim() ? `"${searchQuery.trim()}"` : user.target_role}
                           </span>
                           {liveJobsSource && <span className="ml-1 text-gray-400">from {liveJobsSource}</span>}
                         </p>
-                        <span className="text-[10px] text-gray-400">Ranked by skill match</span>
+                        <span className="text-[10px] text-gray-400 shrink-0">Ranked by skill match</span>
                       </div>
 
                       {/* Job cards */}
@@ -1189,7 +1194,8 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                             {job.skill_match_count > 0 && (
                               <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">
                                 <CheckCircle2 className="h-3 w-3" />
-                                {job.skill_match_count} skills matched
+                                <span className="hidden sm:inline">{job.skill_match_count} skills matched</span>
+                                <span className="sm:hidden">{job.skill_match_count}</span>
                               </div>
                             )}
 
@@ -1200,15 +1206,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                             {/* Content */}
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2 pr-20">
-                                <div>
-                                  <h4 className="text-sm font-bold text-gray-900 group-hover:text-brand transition-colors leading-tight">
+                              <div className="flex items-start justify-between gap-2 pr-12 sm:pr-28">
+                                <div className="min-w-0">
+                                  <h4 className="text-sm font-bold text-gray-900 group-hover:text-brand transition-colors leading-tight break-words">
                                     {job.title}
                                   </h4>
-                                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
                                     <span className="font-medium text-gray-700">{job.company}</span>
                                     <span className="flex items-center gap-0.5">
-                                      <MapPin className="h-3 w-3" />
+                                      <MapPin className="h-3 w-3 shrink-0" />
                                       {job.location}
                                     </span>
                                     {job.seniority_level && (
@@ -1272,7 +1278,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                       {/* Pagination */}
                       {liveJobsTotal > 15 && (
-                        <div className="mt-5 flex items-center justify-center gap-3">
+                        <div className="mt-5 flex items-center justify-center gap-2 sm:gap-3 flex-wrap">
                           <button
                             onClick={() => fetchLiveJobs(liveJobsPage - 1, liveJobsSource)}
                             disabled={liveJobsPage <= 1 || liveJobsLoading}
@@ -1301,18 +1307,18 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
               {demandSubView === 'forecast' && (
               <>
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                <div className="flex justify-between items-center mb-6">
-                  <div>
+              <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 sm:mb-6">
+                  <div className="min-w-0">
                     <h2 className="text-base font-bold text-gray-900">Future Job Market Demand Forecasting</h2>
-                    <p className="text-xs text-gray-500 mt-1">Predictions on tech demand index calculated from LinkedIn, Indeed, and TopJobs.lk</p>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Predictions on tech demand index calculated from LinkedIn, Indeed, and TopJobs.lk</p>
                   </div>
-                  <div className="flex items-center space-x-2 text-xs">
-                    <span className="text-gray-500 font-medium">Forecast Horizon:</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 text-xs w-full sm:w-auto">
+                    <span className="text-gray-500 font-medium shrink-0">Forecast Horizon</span>
                     <select
                       value={forecastHorizon}
                       onChange={(e) => setForecastHorizon(e.target.value)}
-                      className="border border-gray-300 rounded p-1 bg-white"
+                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-brand/20 outline-none"
                     >
                       <option value="2027">1-Year Outlook (2027)</option>
                       <option value="2028">2-Year Outlook (2028)</option>
@@ -1323,8 +1329,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                 {/* SVG Forecasting line chart */}
                 {demandData.length > 0 ? (
-                  <div className="relative">
-                    <div className="h-64 w-full flex items-end justify-between border-b border-l border-gray-300 pb-2 pl-4">
+                  <div className="overflow-x-auto -mx-1 px-1 pb-1">
+                    <div className="relative min-w-[560px] sm:min-w-0">
+                    <div className="h-56 sm:h-64 w-full flex items-end justify-between border-b border-l border-gray-300 pb-2 pl-4">
                       {/* Vertical axis legend */}
                       <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-[10px] text-gray-400 -ml-1 select-none">
                         <span>150</span>
@@ -1336,13 +1343,13 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       {/* Render line bars based on selected forecast years */}
                       {demandData.filter(d => d.year <= parseInt(forecastHorizon)).map((d, index) => {
                         return (
-                          <div key={index} className="flex flex-col items-center flex-1 group">
+                          <div key={index} className="flex flex-col items-center flex-1 min-w-[64px] group">
                             {/* Demand bar graphics */}
-                            <div className="flex items-end space-x-1.5 w-full justify-center h-48 mb-2">
+                            <div className="flex items-end gap-0.5 sm:gap-1 md:gap-1.5 w-full justify-center h-40 sm:h-48 mb-2">
                               {/* Generative AI (Blue) */}
                               <div 
                                 style={{ height: `${(d["Generative AI"] / 150) * 100}%` }}
-                                className="w-3.5 bg-blue-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
+                                className="w-2 sm:w-3 md:w-3.5 bg-blue-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
                                 title={`Generative AI: ${d["Generative AI"]}`}
                               >
                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-blue-700 opacity-0 group-hover:opacity-100">{d["Generative AI"]}</span>
@@ -1350,7 +1357,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                               {/* Python (Indigo) */}
                               <div 
                                 style={{ height: `${(d["Python"] / 150) * 100}%` }}
-                                className="w-3.5 bg-indigo-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
+                                className="w-2 sm:w-3 md:w-3.5 bg-indigo-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
                                 title={`Python: ${d["Python"]}`}
                               >
                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-indigo-700 opacity-0 group-hover:opacity-100">{d["Python"]}</span>
@@ -1358,7 +1365,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                               {/* Cloud (Emerald) */}
                               <div 
                                 style={{ height: `${(d["Cloud Computing"] / 150) * 100}%` }}
-                                className="w-3.5 bg-emerald-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
+                                className="w-2 sm:w-3 md:w-3.5 bg-emerald-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
                                 title={`Cloud Computing: ${d["Cloud Computing"]}`}
                               >
                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-emerald-700 opacity-0 group-hover:opacity-100">{d["Cloud Computing"]}</span>
@@ -1366,7 +1373,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                               {/* Traditional Web (Yellow) */}
                               <div 
                                 style={{ height: `${(d["Traditional Web"] / 150) * 100}%` }}
-                                className="w-3.5 bg-yellow-500 rounded-t transition-all duration-500 hover:opacity-80 relative"
+                                className="w-2 sm:w-3 md:w-3.5 bg-yellow-500 rounded-t transition-all duration-500 hover:opacity-80 relative"
                                 title={`Traditional Web: ${d["Traditional Web"]}`}
                               >
                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-yellow-600 opacity-0 group-hover:opacity-100">{d["Traditional Web"]}</span>
@@ -1374,25 +1381,26 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                               {/* Legacy (Red) */}
                               <div 
                                 style={{ height: `${(d["COBOL/Legacy"] / 150) * 100}%` }}
-                                className="w-3.5 bg-red-400 rounded-t transition-all duration-500 hover:opacity-80 relative"
+                                className="w-2 sm:w-3 md:w-3.5 bg-red-400 rounded-t transition-all duration-500 hover:opacity-80 relative"
                                 title={`COBOL/Legacy: ${d["COBOL/Legacy"]}`}
                               >
                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-red-600 opacity-0 group-hover:opacity-100">{d["COBOL/Legacy"]}</span>
                               </div>
                             </div>
-                            <span className="text-xs font-bold text-gray-700">{d.year}</span>
-                            {d.year > 2026 && <span className="text-[9px] text-blue-600 font-semibold uppercase">Forecast</span>}
+                            <span className="text-[10px] sm:text-xs font-bold text-gray-700">{d.year}</span>
+                            {d.year > 2026 && <span className="text-[8px] sm:text-[9px] text-blue-600 font-semibold uppercase">Forecast</span>}
                           </div>
                         )
                       })}
                     </div>
+                    </div>
                   </div>
                 ) : (
-                  <div className="h-64 flex items-center justify-center text-sm text-gray-500">Querying forecasts...</div>
+                  <div className="h-56 sm:h-64 flex items-center justify-center text-sm text-gray-500">Querying forecasts...</div>
                 )}
 
                 {/* Legend */}
-                <div className="flex flex-wrap justify-center items-center gap-6 mt-6 border-t border-gray-100 pt-4 text-xs font-medium text-gray-600">
+                <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-2 sm:gap-6 mt-5 sm:mt-6 border-t border-gray-100 pt-4 text-[11px] sm:text-xs font-medium text-gray-600">
                   <div className="flex items-center space-x-1.5">
                     <span className="h-3 w-3 rounded bg-blue-600"></span>
                     <span>Generative AI (NLP/LLMs)</span>
@@ -1417,43 +1425,43 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               </div>
 
               {/* Emerging trends card list */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center text-emerald-700">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="text-sm font-bold mb-3 flex items-center text-emerald-700">
                     📈 Rapidly Emerging Skills
                   </h3>
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-gray-700">Generative AI Models (RAG, Agents)</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold">+59% forecasted</span>
+                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
+                      <span className="font-semibold text-gray-700 min-w-0">Generative AI Models (RAG, Agents)</span>
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+59% forecasted</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-gray-700">Prompt Engineering Patterns</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold">+35% forecasted</span>
+                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
+                      <span className="font-semibold text-gray-700 min-w-0">Prompt Engineering Patterns</span>
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+35% forecasted</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-gray-700">AWS Cloud Engineering & Kubernetes</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold">+20% forecasted</span>
+                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
+                      <span className="font-semibold text-gray-700 min-w-0">AWS Cloud Engineering & Kubernetes</span>
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+20% forecasted</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center text-red-700">
+                <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="text-sm font-bold mb-3 flex items-center text-red-700">
                     📉 Gradually Declining Skills
                   </h3>
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-gray-700">COBOL / Mainframe Logic</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold">-83% demand drop</span>
+                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
+                      <span className="font-semibold text-gray-700 min-w-0">COBOL / Mainframe Logic</span>
+                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-83% demand drop</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-gray-700">On-Prem Server Management</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold">-40% demand drop</span>
+                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
+                      <span className="font-semibold text-gray-700 min-w-0">On-Prem Server Management</span>
+                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-40% demand drop</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-gray-700">Static jQuery Frontend Templates</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold">-25% demand drop</span>
+                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
+                      <span className="font-semibold text-gray-700 min-w-0">Static jQuery Frontend Templates</span>
+                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-25% demand drop</span>
                     </div>
                   </div>
                 </div>
