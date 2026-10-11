@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
+import DemandInsightsPanel from './DemandInsightsPanel.jsx'
 import { createNotification } from './notificationsApi.js'
 import { API_URL } from '../App'
 import { 
@@ -27,8 +28,11 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [cvSuccessMsg, setCvSuccessMsg] = useState('')
 
   // API response states
-  const [demandData, setDemandData] = useState([])
+  const [demandData] = useState([])
   const [forecastHorizon, setForecastHorizon] = useState('2029') // 2027, 2028, 2029
+  const [demandInsights, setDemandInsights] = useState(null)
+  const [demandInsightsLoading, setDemandInsightsLoading] = useState(false)
+  const [demandInsightsError, setDemandInsightsError] = useState('')
 
   // Search demand state
   const [searchQuery, setSearchQuery] = useState('')
@@ -85,7 +89,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   // Load initial data
   useEffect(() => {
-    fetchDemandForecast()
     fetchGapAnalysis()
     fetchCareerPath()
     fetchMatchingJobs()
@@ -100,14 +103,26 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   }, [activeTab, user.target_role])
 
   const fetchDemandForecast = async () => {
+    setDemandInsightsLoading(true)
+    setDemandInsightsError('')
+    setDemandInsights(null)
     try {
-      const res = await fetch(`${API_URL}/demand-forecast`)
-      const data = await res.json()
-      setDemandData(data)
+      const res = await fetch(`${API_URL}/forecast/demand-insights?target_year=${forecastHorizon}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setDemandInsights(await res.json())
     } catch (e) {
-      console.error("Error loading demand forecasts", e)
+      console.error('Error loading future demand insights', e)
+      setDemandInsightsError(e.message || 'Could not load demand insights.')
+    } finally {
+      setDemandInsightsLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (activeTab === 'demand' && demandSubView === 'forecast') {
+      fetchDemandForecast()
+    }
+  }, [activeTab, demandSubView, forecastHorizon])
 
   const fetchGapAnalysis = async (targetRole = user.target_role) => {
     setIsSearchingGap(true)
@@ -1201,145 +1216,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                   </div>
                 </div>
 
-                {/* SVG Forecasting line chart */}
-                {demandData.length > 0 ? (
-                  <div className="overflow-x-auto -mx-1 px-1 pb-1">
-                    <div className="relative min-w-[560px] sm:min-w-0">
-                    <div className="h-56 sm:h-64 w-full flex items-end justify-between border-b border-l border-gray-300 pb-2 pl-4">
-                      {/* Vertical axis legend */}
-                      <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-[10px] text-gray-400 -ml-1 select-none">
-                        <span>150</span>
-                        <span>100</span>
-                        <span>50</span>
-                        <span>0</span>
-                      </div>
-                      
-                      {/* Render line bars based on selected forecast years */}
-                      {demandData.filter(d => d.year <= parseInt(forecastHorizon)).map((d, index) => {
-                        return (
-                          <div key={index} className="flex flex-col items-center flex-1 min-w-[64px] group">
-                            {/* Demand bar graphics */}
-                            <div className="flex items-end gap-0.5 sm:gap-1 md:gap-1.5 w-full justify-center h-40 sm:h-48 mb-2">
-                              {/* Generative AI (Blue) */}
-                              <div 
-                                style={{ height: `${(d["Generative AI"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-blue-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Generative AI: ${d["Generative AI"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-blue-700 opacity-0 group-hover:opacity-100">{d["Generative AI"]}</span>
-                              </div>
-                              {/* Python (Indigo) */}
-                              <div 
-                                style={{ height: `${(d["Python"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-indigo-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Python: ${d["Python"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-indigo-700 opacity-0 group-hover:opacity-100">{d["Python"]}</span>
-                              </div>
-                              {/* Cloud (Emerald) */}
-                              <div 
-                                style={{ height: `${(d["Cloud Computing"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-emerald-600 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Cloud Computing: ${d["Cloud Computing"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-emerald-700 opacity-0 group-hover:opacity-100">{d["Cloud Computing"]}</span>
-                              </div>
-                              {/* Traditional Web (Yellow) */}
-                              <div 
-                                style={{ height: `${(d["Traditional Web"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-yellow-500 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`Traditional Web: ${d["Traditional Web"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-yellow-600 opacity-0 group-hover:opacity-100">{d["Traditional Web"]}</span>
-                              </div>
-                              {/* Legacy (Red) */}
-                              <div 
-                                style={{ height: `${(d["COBOL/Legacy"] / 150) * 100}%` }}
-                                className="w-2 sm:w-3 md:w-3.5 bg-red-400 rounded-t transition-all duration-500 hover:opacity-80 relative"
-                                title={`COBOL/Legacy: ${d["COBOL/Legacy"]}`}
-                              >
-                                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold text-red-600 opacity-0 group-hover:opacity-100">{d["COBOL/Legacy"]}</span>
-                              </div>
-                            </div>
-                            <span className="text-[10px] sm:text-xs font-bold text-gray-700">{d.year}</span>
-                            {d.year > 2026 && <span className="text-[8px] sm:text-[9px] text-blue-600 font-semibold uppercase">Forecast</span>}
-                          </div>
-                        )
-                      })}
-                    </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="h-56 sm:h-64 flex items-center justify-center text-sm text-gray-500">Querying forecasts...</div>
-                )}
-
-                {/* Legend */}
-                <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-2 sm:gap-6 mt-5 sm:mt-6 border-t border-gray-100 pt-4 text-[11px] sm:text-xs font-medium text-gray-600">
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-blue-600"></span>
-                    <span>Generative AI (NLP/LLMs)</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-indigo-600"></span>
-                    <span>Python Programming</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-emerald-600"></span>
-                    <span>Cloud Computing (AWS/Docker)</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-yellow-500"></span>
-                    <span>Traditional Web</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="h-3 w-3 rounded bg-red-400"></span>
-                    <span>COBOL / Legacy</span>
-                  </div>
-                </div>
               </div>
-
-              {/* Emerging trends card list */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold mb-3 flex items-center text-emerald-700">
-                    📈 Rapidly Emerging Skills
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">Generative AI Models (RAG, Agents)</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+59% forecasted</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">Prompt Engineering Patterns</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+35% forecasted</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">AWS Cloud Engineering & Kubernetes</span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold shrink-0 whitespace-nowrap">+20% forecasted</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <h3 className="text-sm font-bold mb-3 flex items-center text-red-700">
-                    📉 Gradually Declining Skills
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">COBOL / Mainframe Logic</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-83% demand drop</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">On-Prem Server Management</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-40% demand drop</span>
-                    </div>
-                    <div className="flex justify-between items-start sm:items-center gap-2 text-xs">
-                      <span className="font-semibold text-gray-700 min-w-0">Static jQuery Frontend Templates</span>
-                      <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full font-bold shrink-0 whitespace-nowrap">-25% demand drop</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <DemandInsightsPanel
+                insights={demandInsights}
+                isLoading={demandInsightsLoading}
+                error={demandInsightsError}
+                onRetry={fetchDemandForecast}
+                onCollect={triggerPipeline}
+                canCollect={Boolean(user.target_role)}
+              />
               </>
               )}
 
