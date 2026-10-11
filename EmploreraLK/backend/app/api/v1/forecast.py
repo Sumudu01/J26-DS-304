@@ -10,6 +10,7 @@ from app.schemas.job_posting import (
     JobListResponse,
 )
 from app.components.forecasting.services.scraping_service import ScrapingService
+from app.components.forecasting.services.forecasting_service import ForecastingService
 
 logger = logging.getLogger("emploreralk.api.forecast")
 
@@ -110,6 +111,22 @@ def get_collection_stats(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     return ScrapingService.get_collection_statistics(db=db)
+
+
+@router.get(
+    "/demand-insights",
+    response_model=Dict[str, Any],
+    summary="Forecast emerging and declining job-market skills",
+    description=(
+        "Compares extracted skills in the latest 12 months of dated job postings "
+        "with the preceding 12 months and generates an explainable target-year outlook."
+    ),
+)
+def get_demand_insights(
+    target_year: int = Query(2029, ge=2027, le=2036),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return ForecastingService.get_demand_insights(db=db, target_year=target_year)
 
 
 # ─── NLP Skill Extraction Agent Endpoints ────────────────────────────────────

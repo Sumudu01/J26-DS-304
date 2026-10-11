@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.models.notification import Notification
 from app.models.user import User
 from app.schemas.auth import ProfileUpdateRequest, UserResponse
 
@@ -43,8 +44,13 @@ def update_profile(payload: ProfileUpdateRequest, db: Session = Depends(get_db))
     if payload.target_role is not None:
         user.target_role = payload.target_role
 
+    db.add(Notification(
+        user_id=user.id,
+        type="profile",
+        title="Profile updated",
+        body="Your career profile and job recommendations will use your latest information.",
+    ))
     db.commit()
     db.refresh(user)
 
     return {"user": _user_to_response(user)}
-
