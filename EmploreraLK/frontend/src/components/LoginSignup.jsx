@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import Logo from './Logo.jsx'
+import TargetRoleInput from './TargetRoleInput.jsx'
 import { API_URL, BACKEND_URL } from '../App'
 import { ArrowLeft, Loader2, Eye, EyeOff } from 'lucide-react'
 
@@ -360,18 +361,14 @@ function LoginSignup({ onLogin, onNavigate, isSignup }) {
 
                       <div>
                         <label htmlFor="targetRole" className="block text-sm font-medium text-gray-700">Target Role</label>
-                        <select
+                        <TargetRoleInput
                           id="targetRole"
                           value={targetRole}
-                          onChange={(e) => setTargetRole(e.target.value)}
+                          onChange={setTargetRole}
+                          required
                           className="mt-1 block w-full px-3 py-1.5 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                        >
-                          <option value="AI Engineer">AI Engineer</option>
-                          <option value="Machine Learning Engineer">Machine Learning Engineer</option>
-                          <option value="Cloud Architect">Cloud Architect</option>
-                          <option value="Data Analyst">Data Analyst</option>
-                          <option value="Full Stack Developer">Full Stack Developer</option>
-                        </select>
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Select a suggestion or enter any role title.</p>
                       </div>
 
                       <div>
