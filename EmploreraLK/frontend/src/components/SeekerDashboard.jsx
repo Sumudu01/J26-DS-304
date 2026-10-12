@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
 import DemandInsightsPanel from './DemandInsightsPanel.jsx'
+import TargetRoleInput from './TargetRoleInput.jsx'
 import { createNotification } from './notificationsApi.js'
 import { API_URL } from '../App'
 import { 
@@ -21,6 +22,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [editTargetRole, setEditTargetRole] = useState(user.target_role || 'AI Engineer')
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false)
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('')
+  const [profileErrorMsg, setProfileErrorMsg] = useState('')
 
   // CV Upload state
   const [cvFile, setCvFile] = useState(null)
@@ -74,6 +76,14 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   const graphContainerRef = useRef(null)
   const [graphWidth, setGraphWidth] = useState(800)
+  const userSkillsKey = Array.isArray(user.skills) ? user.skills.join(',') : user.skills || ''
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      setEditSkills(Array.isArray(user.skills) ? user.skills.join(', ') : user.skills || '')
+      setEditTargetRole(user.target_role || '')
+    })
+  }, [user.skills, user.target_role])
 
   useEffect(() => {
     const handleResize = () => {
@@ -100,7 +110,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     if (activeTab === 'demand') {
       fetchLiveJobs(1, '')
     }
-  }, [activeTab, user.target_role])
+  }, [activeTab, user.target_role, userSkillsKey])
 
   const fetchDemandForecast = async () => {
     setDemandInsightsLoading(true)
@@ -404,25 +414,31 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     e.preventDefault()
     setIsUpdatingProfile(true)
     setProfileSuccessMsg('')
+    setProfileErrorMsg('')
     try {
       const skillList = editSkills.split(',').map(s => s.trim()).filter(Boolean)
+      const targetRole = editTargetRole.trim()
+      if (!targetRole) {
+        setProfileErrorMsg('Please enter a target role.')
+        return
+      }
       const res = await fetch(`${API_URL}/profile/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: user.email,
           skills: skillList,
-          target_role: editTargetRole
+          target_role: targetRole
         })
       })
       const data = await res.json()
-      if (res.ok) {
-        onUpdateUser(data.user)
-        setProfileSuccessMsg('Skills updated. Analytics refreshed!')
-        setTimeout(() => setProfileSuccessMsg(''), 4000)
-      }
+      if (!res.ok) throw new Error(data.error || data.detail || 'Could not update your profile.')
+      onUpdateUser(data.user)
+      setProfileSuccessMsg('Profile updated. Analytics refreshed!')
+      setTimeout(() => setProfileSuccessMsg(''), 4000)
     } catch (e) {
       console.error("Error updating profile", e)
+      setProfileErrorMsg(e.message || 'Could not update your profile.')
     } finally {
       setIsUpdatingProfile(false)
     }
@@ -2025,6 +2041,11 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         {profileSuccessMsg}
                       </div>
                     )}
+                    {profileErrorMsg && (
+                      <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded text-center" role="alert">
+                        {profileErrorMsg}
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1.5">Edit Skills (comma separated)</label>
                       <textarea
@@ -2037,17 +2058,13 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1.5">Change Target Role</label>
-                      <select
+                      <TargetRoleInput
                         value={editTargetRole}
-                        onChange={(e) => setEditTargetRole(e.target.value)}
-                        className="block w-full p-3 text-sm border border-gray-300 bg-white rounded-lg focus:ring-brand focus:border-brand cursor-pointer"
-                      >
-                        <option value="AI Engineer">AI Engineer</option>
-                        <option value="Machine Learning Engineer">Machine Learning Engineer</option>
-                        <option value="Cloud Architect">Cloud Architect</option>
-                        <option value="Data Analyst">Data Analyst</option>
-                        <option value="Full Stack Developer">Full Stack Developer</option>
-                      </select>
+                        onChange={setEditTargetRole}
+                        required
+                        className="block w-full p-3 text-sm border border-gray-300 bg-white rounded-lg focus:ring-brand focus:border-brand"
+                      />
+                      <p className="mt-1.5 text-[11px] text-gray-500">Choose a suggestion or type any target role.</p>
                     </div>
                     <button
                       type="submit"
