@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Union
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 class SignupRequest(BaseModel):
     name: str = Field(..., min_length=1, description="Full Name")
@@ -11,6 +11,16 @@ class SignupRequest(BaseModel):
     target_role: Optional[str] = None
     skills: Optional[Union[str, List[str]]] = None
     company: Optional[str] = None
+
+    @field_validator("target_role")
+    @classmethod
+    def normalize_target_role(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Target role cannot be blank")
+        return normalized
 
 class LoginRequest(BaseModel):
     email: EmailStr = Field(..., description="Email address")
@@ -41,6 +51,16 @@ class ProfileUpdateRequest(BaseModel):
     email: EmailStr
     skills: Optional[Union[str, List[str]]] = None
     target_role: Optional[str] = None
+
+    @field_validator("target_role")
+    @classmethod
+    def normalize_target_role(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Target role cannot be blank")
+        return normalized
 
 class ErrorResponse(BaseModel):
     error: str

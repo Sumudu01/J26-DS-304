@@ -104,6 +104,11 @@ function App() {
     setCurrentView('dashboard')
   }
 
+  const handleUpdateUser = (updatedUser: User) => {
+    setUser(updatedUser)
+    localStorage.setItem('emploeralk_user', JSON.stringify(updatedUser))
+  }
+
   const handleLogout = () => {
     setUser(null)
     localStorage.removeItem('emploeralk_user')
@@ -121,7 +126,7 @@ function App() {
     
     switch (user.role) {
       case 'seeker':
-        return <SeekerDashboard user={user} onUpdateUser={(u: User) => setUser(u)} onLogout={handleLogout} />
+        return <SeekerDashboard user={user} onUpdateUser={handleUpdateUser} onLogout={handleLogout} />
       case 'recruiter':
         return <RecruiterDashboard user={user} onLogout={handleLogout} />
       case 'admin':
