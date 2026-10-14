@@ -162,6 +162,8 @@ tsconfig.tsbuildinfo
 # Vite / rollup cache
 .vite/
 .rollup.cache/
+.vercel/
+.cache/
 
 
 # ─────────────────────────────────────────────
@@ -216,6 +218,9 @@ share/python-wheels/
 backend/data/raw/
 backend/data/processed/
 backend/data/models/
+backend/.model_cache/
+backend/.huggingface/
+backend/huggingface/
 *.pkl
 *.pickle
 *.joblib
