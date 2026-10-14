@@ -9,7 +9,8 @@ import {
   TrendingUp, FileSearch, Milestone, CheckSquare, 
   User, Upload, BookOpen, GraduationCap, Briefcase, 
   MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
-  LogOut, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle, Menu, ChevronLeft
+  LogOut, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle, Menu, ChevronLeft,
+  Target, Filter, Clock3, Sparkles
 } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
 
@@ -45,6 +46,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [gapData, setGapData] = useState(null)
   const [careerData, setCareerData] = useState(null)
   const [matchedJobs, setMatchedJobs] = useState([])
+  const [matchingTotal, setMatchingTotal] = useState(0)
+  const [matchingPage, setMatchingPage] = useState(1)
+  const [matchingSource, setMatchingSource] = useState('')
+  const [matchingError, setMatchingError] = useState('')
   
   // UI states
   const [loading, setLoading] = useState(false)
@@ -101,7 +106,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   useEffect(() => {
     fetchGapAnalysis()
     fetchCareerPath()
-    fetchMatchingJobs()
+    fetchMatchingJobs('', 1, '')
     fetchSalaryInsights()
   }, [user]) // Re-run whenever user profile changes (skills, target_role)
 
@@ -185,18 +190,30 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     }
   }
 
-  const fetchMatchingJobs = async (query = '') => {
+  const fetchMatchingJobs = async (query = '', page = 1, source = matchingSource) => {
     setIsSearchingJobs(true)
+    setMatchingError('')
     try {
-      const res = await fetch(`${API_URL}/matching-jobs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skills: user.skills, query })
+      const skillsParam = Array.isArray(user.skills) ? user.skills.join(',') : (user.skills || '')
+      const params = new URLSearchParams({
+        skills: skillsParam,
+        page: String(page),
+        page_size: '12',
       })
+      if (user.target_role) params.set('target_role', user.target_role)
+      if (query.trim()) params.set('keyword', query.trim())
+      if (source) params.set('source', source)
+      const res = await fetch(`${API_URL}/forecast/jobs/recommended?${params.toString()}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setMatchedJobs(data)
+      setMatchedJobs(data.items || [])
+      setMatchingTotal(data.total_matched || 0)
+      setMatchingPage(page)
     } catch (e) {
       console.error("Error loading matched jobs", e)
+      setMatchedJobs([])
+      setMatchingTotal(0)
+      setMatchingError('Could not load matching jobs. Check that the backend is running and try again.')
     } finally {
       setIsSearchingJobs(false)
     }
@@ -1815,138 +1832,59 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           {/* TAB 4: SKILL MATCHING AND JOB ALIGNMENT */}
           {activeTab === 'matching' && (
-            <div className="space-y-6">
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-4">
-                <h2 className="text-base font-bold text-gray-900">Skill Matching & Vacancy Alignment</h2>
-                <p className="text-xs text-gray-500 mt-1 mb-5">
-                  Jobs scraped from LinkedIn, TopJobs.lk, and Indeed, matched automatically using your calculated skill matching coefficient.
-                </p>
-
-                <form 
-                  onSubmit={(e) => { e.preventDefault(); fetchMatchingJobs(jobSearchQuery); }}
-                  className="flex items-center gap-3"
-                >
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      value={jobSearchQuery}
-                      onChange={(e) => setJobSearchQuery(e.target.value)}
-                      placeholder='Search jobs by title, company, or skills...'
-                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand/40 outline-none transition-all placeholder:text-gray-400"
-                    />
+            <div className="space-y-5">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand via-brand-dark to-slate-900 p-5 text-white shadow-lg sm:p-7">
+                <div className="absolute -right-10 -top-16 h-48 w-48 rounded-full border-[18px] border-white/10" />
+                <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="max-w-2xl">
+                    <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200"><Sparkles className="h-3.5 w-3.5" />Personalised job matching</div>
+                    <h2 className="text-2xl font-black tracking-tight sm:text-3xl">Find roles that fit your real skills.</h2>
+                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-blue-100">We compare your profile with collected job postings and surface the skills that give you the strongest starting point.</p>
                   </div>
-                  <button
-                    type="submit"
-                    disabled={isSearchingJobs}
-                    className="px-5 py-2.5 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-50 flex items-center space-x-1.5"
-                  >
-                    {isSearchingJobs ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                    <span>{isSearchingJobs ? 'Searching...' : 'Search'}</span>
-                  </button>
-                  {jobSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => { setJobSearchQuery(''); fetchMatchingJobs(''); }}
-                      className="px-3 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
-                    >
-                      Clear
-                    </button>
-                  )}
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:min-w-[250px]">
+                    <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm"><p className="text-[10px] font-semibold uppercase text-blue-200">Roles found</p><p className="mt-1 text-2xl font-black">{matchingTotal}</p></div>
+                    <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm"><p className="text-[10px] font-semibold uppercase text-blue-200">Your skills</p><p className="mt-1 text-2xl font-black">{Array.isArray(user.skills) ? user.skills.length : 0}</p></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+                <form onSubmit={(e) => { e.preventDefault(); fetchMatchingJobs(jobSearchQuery, 1, matchingSource) }} className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input type="text" value={jobSearchQuery} onChange={(e) => setJobSearchQuery(e.target.value)} placeholder="Search by role, company, location, or skill" className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm outline-none transition-all placeholder:text-gray-400 focus:border-brand/40 focus:ring-2 focus:ring-brand/20" /></div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <div className="relative"><Filter className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" /><select value={matchingSource} onChange={(e) => { setMatchingSource(e.target.value); fetchMatchingJobs(jobSearchQuery, 1, e.target.value) }} className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-8 text-xs font-semibold text-gray-600 outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/20 sm:w-36" aria-label="Filter by job source"><option value="">All sources</option><option value="LinkedIn">LinkedIn</option><option value="TopJobs">TopJobs</option></select></div>
+                    <button type="submit" disabled={isSearchingJobs} className="flex items-center justify-center gap-1.5 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50">{isSearchingJobs ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}{isSearchingJobs ? 'Searching...' : 'Find matches'}</button>
+                    {(jobSearchQuery || matchingSource) && <button type="button" onClick={() => { setJobSearchQuery(''); setMatchingSource(''); fetchMatchingJobs('', 1, '') }} className="rounded-lg border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 transition-all hover:bg-gray-50 hover:text-gray-700">Reset</button>}
+                  </div>
                 </form>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-400"><Target className="h-3.5 w-3.5 text-brand" /><span>Matching against</span><span className="rounded-full bg-brand/5 px-2 py-0.5 font-semibold text-brand">{user.target_role || 'your target role'}</span><span className="hidden text-gray-300 sm:inline">|</span><span>Ranked by shared skills</span></div>
               </div>
 
-              <div className="space-y-4">
-                {matchedJobs.map((job) => {
-                  const hasApplied = appliedJobIds.has(job.id)
-                  return (
-                    <div key={job.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-brand/40 transition-all shadow-sm flex flex-col md:flex-row justify-between gap-6">
-                      <div className="flex-1 space-y-3">
-                        {/* Job header */}
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <h3 className="text-sm font-bold text-gray-900">{job.title}</h3>
-                            <div className="flex items-center space-x-2 text-xs text-gray-500 mt-0.5">
-                              <span className="font-semibold text-gray-700">{job.company}</span>
-                              <span>•</span>
-                              <span className="flex items-center"><MapPin className="h-3 w-3 mr-0.5" /> {job.location}</span>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center space-x-2">
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 border border-gray-200 rounded-full text-[10px] font-semibold">
-                              {job.platform}
-                            </span>
-                            <span className="text-[10px] text-gray-400 font-medium">{job.posted_date}</span>
-                          </div>
+              {matchingError && <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" /><div className="flex-1"><p className="font-bold">Matching service unavailable</p><p className="mt-0.5">{matchingError}</p></div><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage, matchingSource)} className="font-bold text-amber-900 underline">Retry</button></div>}
+
+              {isSearchingJobs && matchedJobs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-16 text-center shadow-sm"><RefreshCw className="h-8 w-8 animate-spin text-brand/50" /><p className="mt-3 text-sm font-semibold text-gray-700">Calculating your best matches...</p><p className="mt-1 text-xs text-gray-400">Searching the latest collected job postings.</p></div>
+              ) : matchedJobs.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm"><Briefcase className="mx-auto h-9 w-9 text-gray-300" /><p className="mt-3 text-sm font-bold text-gray-700">No matching roles yet</p><p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-gray-400">Try a broader search, update your skills in My Profile, or run the job collection pipeline from Market Forecasts.</p></div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-1 text-xs text-gray-500"><span><strong className="text-gray-800">{matchingTotal}</strong> roles matched to your profile</span><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage, matchingSource)} disabled={isSearchingJobs} className="flex items-center gap-1 font-semibold text-brand hover:text-brand-dark disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${isSearchingJobs ? 'animate-spin' : ''}`} /> Refresh</button></div>
+                  {matchedJobs.map((job) => {
+                    const skills = Array.isArray(user.skills) ? user.skills : []
+                    const matchScore = skills.length ? Math.min(100, Math.round((job.skill_match_count / skills.length) * 100)) : 0
+                    const overlap = (job.skill_overlap || []).map(String).map((skill) => skill.toLowerCase())
+                    return (
+                      <article key={job.id || job.job_id} className="group rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-brand/30 hover:shadow-md sm:p-5">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+                          <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div></div></div>
+                          <div className="flex shrink-0 items-center justify-between gap-4 border-t border-gray-100 pt-3 lg:w-32 lg:flex-col lg:items-center lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0"><div className="text-center"><p className={`text-2xl font-black ${matchScore >= 70 ? 'text-emerald-600' : matchScore >= 40 ? 'text-amber-600' : 'text-gray-500'}`}>{matchScore}%</p><p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Skill fit</p><p className="mt-1 text-[10px] text-gray-400">{job.skill_match_count} shared skill{job.skill_match_count === 1 ? '' : 's'}</p></div>{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-dark">View role <ExternalLink className="h-3 w-3" /></a> : <span className="text-[10px] text-gray-400">Link unavailable</span>}</div>
                         </div>
-
-                        {/* Description snippet */}
-                        <p className="text-xs text-gray-600 leading-relaxed">{job.description}</p>
-
-                        {/* Salary and tags */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-500 border-t border-gray-100 pt-3">
-                          <span className="flex items-center text-brand font-semibold"><DollarSign className="h-3.5 w-3.5 mr-0.5 text-brand" /> {job.salary}</span>
-                          
-                          <div className="flex flex-wrap gap-1">
-                            {job.required_skills.map((skill, index) => {
-                              const matches = job.matching_skills.includes(skill)
-                              return (
-                                <span 
-                                  key={index}
-                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${
-                                    matches 
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                                      : 'bg-red-50 text-red-700 border-red-200'
-                                  }`}
-                                >
-                                  {matches ? '✓' : '✗'} {skill}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Score gauge & CTA */}
-                      <div className="flex md:flex-col items-center justify-between md:justify-center border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6 gap-4 shrink-0">
-                        <div className="text-center md:mb-3">
-                          <span className={`text-2xl font-black block ${
-                            job.match_score >= 80 ? 'text-emerald-600' : job.match_score >= 50 ? 'text-yellow-600' : 'text-gray-500'
-                          }`}>
-                            {job.match_score}%
-                          </span>
-                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Match Score</span>
-                        </div>
-
-                        {hasApplied ? (
-                          <div className="px-4 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded text-xs font-semibold flex items-center space-x-1">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                            <span>Applied</span>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => handleApplyJob(job.id)}
-                            className="px-5 py-2 bg-brand text-white hover:bg-brand-light rounded text-xs font-semibold shadow-sm transition-all"
-                          >
-                            Easy Apply
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-
-                {matchedJobs.length === 0 && (
-                  <div className="p-8 text-center text-sm text-gray-500 border border-dashed rounded-lg bg-white">
-                    No active job listings synced from platform feeds matching your criteria.
-                  </div>
-                )}
-              </div>
+                      </article>
+                    )
+                  })}
+                  {matchingTotal > 12 && <div className="flex items-center justify-center gap-3 pt-2"><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage - 1, matchingSource)} disabled={matchingPage <= 1 || isSearchingJobs} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="text-xs text-gray-500">Page {matchingPage} of {Math.ceil(matchingTotal / 12)}</span><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage + 1, matchingSource)} disabled={matchingPage * 12 >= matchingTotal || isSearchingJobs} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div>}
+                </div>
+              )}
             </div>
           )}
 
