@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -21,6 +21,29 @@ from app.models.job_posting import JobPosting, DataCollectionRun
 from app.schemas.job_posting import AgentCollectionGoal
 
 logger = logging.getLogger("emploreralk.agents.data_collection")
+
+IT_ROLE_PATTERN = re.compile(
+    r"\b(?:"
+    r"information technology|information systems|computer science|software|programmer|programming|developer|development|"
+    r"web|frontend|front[- ]end|backend|back[- ]end|full[- ]stack|"
+    r"data scientist|data science|data engineer|data analyst|database|"
+    r"machine learning|artificial intelligence|ai engineer|"
+    r"cyber ?security|information security|penetration tester|"
+    r"network(?:ing)?|cloud|devops|site reliability|sre|"
+    r"quality assurance|software tester|qa(?: analyst| intern| tester| engineer)?|"
+    r"systems? analyst|systems? administrator|system administrator|"
+    r"technical support|it support|help ?desk|"
+    r"erp|sap consultant|salesforce|embedded systems?|"
+    r"ui/?ux|ux/?ui|user experience|user interface|"
+    r"it"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_it_related_job(title: str) -> bool:
+    """Only collect roles whose titles clearly identify an IT/technology field."""
+    return bool(title and IT_ROLE_PATTERN.search(title))
 
 
 @dataclass
@@ -337,10 +360,19 @@ class LinkedInCollector:
                     or soup.find("div", class_="description__text")
                 )
                 if desc_tag:
-                    return desc_tag.get_text(separator="\n", strip=True)
+                    description = desc_tag.get_text(separator="\n", strip=True)
+                    if description:
+                        return description
+                logger.warning("LinkedIn job description markup missing for job %s", job_id)
+            else:
+                logger.warning(
+                    "LinkedIn job description request failed with HTTP %s for job %s",
+                    res.status_code,
+                    job_id,
+                )
             return None
         except Exception as e:
-            logger.debug("Failed to fetch LinkedIn job description for %s: %s", job_id, e)
+            logger.warning("Failed to fetch LinkedIn job description for %s: %s", job_id, e)
             return None
 
 
@@ -466,27 +498,55 @@ class TopJobsCollector:
             logger.debug("Failed parsing TopJobs row: %s", e)
             return None
 
-    def fetch_job_description(self, ad_url: str, headers: Dict[str, str]) -> Optional[str]:
-        """Fetch full advertisement and job description text from TopJobs servlet."""
+    def fetch_job_content(
+        self,
+        ad_url: str,
+        headers: Dict[str, str]
+    ) -> Tuple[Optional[str], List[str]]:
+        """Fetch text and image-based advertisement content from TopJobs."""
         try:
             res = self.session.get(ad_url, headers=headers, timeout=15)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                # Remove scripts, styles, navigation alerts
-                for tag in soup(["script", "style", "noscript", "meta"]):
-                    tag.extract()
-                text = soup.get_text(separator="\n", strip=True)
-                # Remove repetitive TopJobs boilerplate lines
+                # The advertisement body is rendered in #remark; avoid collecting site-wide chrome.
+                content = soup.find(id="remark")
+                if content is None:
+                    logger.warning(
+                        "TopJobs advertisement body #remark missing from HTTP 200 response: %s",
+                        ad_url,
+                    )
+                    return None, []
+                image_urls = []
+                for image in content.find_all("img"):
+                    image_src = image.get("src") or image.get("data-src")
+                    if image_src and urlparse(image_src).path.lower().endswith(
+                        (".jpg", ".jpeg", ".png")
+                    ):
+                        image_url = urljoin(TopJobsConfig.BASE_URL + "/", image_src)
+                        image_host = urlparse(image_url).hostname or ""
+                        if image_host == "topjobs.lk" or image_host.endswith(".topjobs.lk"):
+                            image_urls.append(image_url)
+                for tag in content(["script", "style", "noscript", "meta"]):
+                    tag.decompose()
+                text = content.get_text(separator="\n", strip=True)
                 cleaned_lines = []
                 for line in text.splitlines():
                     l = line.strip()
                     if l and not l.startswith("Seems you have change your Email") and l != "VACVIEW" and l != "":
                         cleaned_lines.append(l)
-                return "\n".join(cleaned_lines)
-            return None
+                description = "\n".join(cleaned_lines)
+                if not description and not image_urls:
+                    logger.warning("TopJobs advertisement returned no text or images: %s", ad_url)
+                return description or None, image_urls
+            logger.warning(
+                "TopJobs advertisement request failed with HTTP %s: %s",
+                res.status_code,
+                ad_url,
+            )
+            return None, []
         except Exception as e:
-            logger.debug("Failed fetching TopJobs description from %s: %s", ad_url, e)
-            return None
+            logger.warning("Failed fetching TopJobs description from %s: %s", ad_url, e)
+            return None, []
 
 
 class LinkedInDataCollectionAgent:
@@ -515,6 +575,7 @@ class LinkedInDataCollectionAgent:
         self.memory_known_ids: Set[str] = set()
         self.memory_known_urls: Set[str] = set()
         self.memory_known_jobs: List[JobData] = []
+        self.memory_topjobs_missing_descriptions: Set[str] = set()
         self.telemetry_trace: List[AgentStepTelemetry] = []
 
         self._load_memory()
@@ -524,7 +585,7 @@ class LinkedInDataCollectionAgent:
         retries = Retry(
             total=3,
             backoff_factor=1.0,
-            status_forcelist=[500, 502, 503, 504],
+            status_forcelist=[429, 500, 502, 503, 504],
             raise_on_status=False
         )
         session.mount("https://", HTTPAdapter(max_retries=retries))
@@ -545,12 +606,15 @@ class LinkedInDataCollectionAgent:
                     JobPosting.job_link,
                     JobPosting.title,
                     JobPosting.company,
-                    JobPosting.source
+                    JobPosting.source,
+                    JobPosting.description_raw,
                 ).all()
 
                 for row in existing:
                     if row[0]:
                         self.memory_known_ids.add(row[0])
+                        if row[4] == "TopJobs" and not (row[5] or "").strip():
+                            self.memory_topjobs_missing_descriptions.add(row[0])
                     if row[1]:
                         self.memory_known_urls.add(row[1])
                     if row[2] and row[3]:
@@ -673,6 +737,9 @@ class LinkedInDataCollectionAgent:
                     self.db.rollback()
 
         unique_collected_jobs: List[JobData] = []
+        updated_existing_descriptions = False
+        non_it_jobs_filtered = 0
+        topjobs_descriptions_attempted: Set[str] = set()
         duplicates_skipped = 0
         cross_platform_merged = 0
         rate_limit_events = 0
@@ -694,6 +761,58 @@ class LinkedInDataCollectionAgent:
             raw_cards = self.topjobs_collector.fetch_listings(keywords, headers)
             requests_made += 1
 
+            if goal.fetch_full_description and self.db:
+                existing_topjobs = self.db.query(JobPosting).filter(
+                    JobPosting.source == "TopJobs"
+                ).all()
+                pending_backfills = []
+                for existing_job in existing_topjobs:
+                    if not is_it_related_job(existing_job.title):
+                        continue
+                    metadata = existing_job.get_metadata()
+                    image_urls = metadata.get("description_image_urls", [])
+                    if isinstance(image_urls, str):
+                        image_urls = [image_urls]
+                    if (existing_job.description_raw or "").strip() or image_urls:
+                        continue
+                    pending_backfills.append((existing_job, metadata))
+
+                backfilled_descriptions = 0
+                for existing_job, metadata in pending_backfills:
+                    if not existing_job.job_link:
+                        logger.warning(
+                            "Cannot backfill TopJobs description for %s: job link is empty",
+                            existing_job.job_id,
+                        )
+                        continue
+                    topjobs_descriptions_attempted.add(existing_job.job_id)
+                    time.sleep(random.uniform(0.8, goal.min_delay))
+                    requests_made += 1
+                    desc_text, image_urls = self.topjobs_collector.fetch_job_content(
+                        existing_job.job_link, headers
+                    )
+                    if not desc_text and not image_urls:
+                        continue
+                    if desc_text:
+                        existing_job.description_raw = desc_text
+                    if image_urls:
+                        metadata["description_image_urls"] = image_urls
+                        existing_job.set_metadata(metadata)
+                    existing_job.quality_score = 100
+                    updated_existing_descriptions = True
+                    backfilled_descriptions += 1
+                    self.memory_topjobs_missing_descriptions.discard(existing_job.job_id)
+
+                self._record_telemetry(
+                    action="BACKFILL_TOPJOBS_DESCRIPTIONS",
+                    thought="Retrying saved IT-related TopJobs adverts that have no stored description text or image.",
+                    observation=(
+                        f"Fetched descriptions for {backfilled_descriptions} of "
+                        f"{len(pending_backfills)} pending TopJobs postings."
+                    ),
+                    status="ok" if backfilled_descriptions == len(pending_backfills) else "partial"
+                )
+
             self._record_telemetry(
                 action="PROCESS_TOPJOBS_LISTINGS",
                 thought=f"Received {len(raw_cards)} raw vacancy rows from TopJobs.lk. Beginning deduplication and description extraction.",
@@ -711,6 +830,9 @@ class LinkedInDataCollectionAgent:
                 parsed_job = self.topjobs_collector.parse_job_row(tr, meta)
                 if not parsed_job or not parsed_job.job_id:
                     continue
+                if not is_it_related_job(parsed_job.title):
+                    non_it_jobs_filtered += 1
+                    continue
 
                 # Deduplication check
                 is_dup, dup_reason = self._evaluate_and_deduplicate(
@@ -720,6 +842,36 @@ class LinkedInDataCollectionAgent:
                     duplicates_skipped += 1
                     if "Cross-platform" in dup_reason:
                         cross_platform_merged += 1
+                    if (
+                        goal.fetch_full_description
+                        and self.db
+                        and parsed_job.job_id in self.memory_topjobs_missing_descriptions
+                        and parsed_job.job_id not in topjobs_descriptions_attempted
+                    ):
+                        topjobs_descriptions_attempted.add(parsed_job.job_id)
+                        existing_job = self.db.query(JobPosting).filter(
+                            JobPosting.job_id == parsed_job.job_id,
+                            JobPosting.source == "TopJobs",
+                        ).first()
+                        if existing_job and not (existing_job.description_raw or "").strip():
+                            metadata = existing_job.get_metadata()
+                            if metadata.get("description_image_urls"):
+                                self.memory_topjobs_missing_descriptions.discard(parsed_job.job_id)
+                            else:
+                                time.sleep(random.uniform(0.8, goal.min_delay))
+                                requests_made += 1
+                                desc_text, image_urls = self.topjobs_collector.fetch_job_content(
+                                    parsed_job.job_link, headers
+                                )
+                                if desc_text or image_urls:
+                                    if desc_text:
+                                        existing_job.description_raw = desc_text
+                                    if image_urls:
+                                        metadata["description_image_urls"] = image_urls
+                                        existing_job.set_metadata(metadata)
+                                    existing_job.quality_score = 100
+                                    updated_existing_descriptions = True
+                                    self.memory_topjobs_missing_descriptions.discard(parsed_job.job_id)
                     logger.debug("TopJobs duplicate skipped: %s (%s)", parsed_job.title, dup_reason)
                     continue
 
@@ -727,9 +879,14 @@ class LinkedInDataCollectionAgent:
                 if goal.fetch_full_description and parsed_job.job_link:
                     time.sleep(random.uniform(0.8, goal.min_delay))
                     requests_made += 1
-                    desc_text = self.topjobs_collector.fetch_job_description(parsed_job.job_link, headers)
+                    desc_text, image_urls = self.topjobs_collector.fetch_job_content(
+                        parsed_job.job_link, headers
+                    )
                     if desc_text:
                         parsed_job.description_raw = desc_text
+                    if image_urls:
+                        parsed_job.raw_metadata["description_image_urls"] = image_urls
+                    if desc_text or image_urls:
                         parsed_job.quality_score = 100
 
                 # Register in memory and accepted list
@@ -807,6 +964,9 @@ class LinkedInDataCollectionAgent:
                     parsed_job = self.linkedin_collector.parse_job_card(card, keywords)
                     if not parsed_job or not parsed_job.job_id:
                         continue
+                    if not is_it_related_job(parsed_job.title):
+                        non_it_jobs_filtered += 1
+                        continue
 
                     # Cross-platform & intra-platform deduplication
                     is_dup, dup_reason = self._evaluate_and_deduplicate(
@@ -839,7 +999,7 @@ class LinkedInDataCollectionAgent:
 
         # ─── 3. Database Persistence & Finalization ──────────────────────────
         saved_db_count = 0
-        if self.db and unique_collected_jobs:
+        if self.db and (unique_collected_jobs or updated_existing_descriptions):
             try:
                 for job in unique_collected_jobs:
                     # Check if already in DB (safety check)
@@ -880,6 +1040,14 @@ class LinkedInDataCollectionAgent:
         final_status = "completed" if len(unique_collected_jobs) >= max_jobs else "partial"
         if rate_limit_events > 0 and len(unique_collected_jobs) == 0:
             final_status = "rate_limited"
+
+        if non_it_jobs_filtered:
+            self._record_telemetry(
+                action="FILTER_NON_IT_POSTINGS",
+                thought="Excluded postings that are not clearly related to information technology.",
+                observation=f"Filtered {non_it_jobs_filtered} non-IT postings before persistence.",
+                status="ok"
+            )
 
         report = AgentExecutionReport(
             run_id=run_id,
