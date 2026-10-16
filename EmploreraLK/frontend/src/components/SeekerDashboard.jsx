@@ -1094,10 +1094,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       {/* Stats row */}
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
                         <p className="text-xs text-gray-500 break-words">
-                          <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found for{' '}
-                          <span className="font-semibold text-brand">
-                            {hasSearched && searchQuery.trim() ? `"${searchQuery.trim()}"` : user.target_role}
-                          </span>
+                          <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found
                           {liveJobsSource && <span className="ml-1 text-gray-400">from {liveJobsSource}</span>}
                         </p>
                         <span className="text-[10px] text-gray-400 shrink-0">Ranked by skill match</span>
