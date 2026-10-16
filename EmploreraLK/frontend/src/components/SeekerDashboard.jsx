@@ -624,7 +624,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               <p className="hidden sm:block text-xs text-gray-500 mt-0.5">
               {activeTab === 'profile'
                 ? 'Manage your skills, target role, and upload your CV'
-                : 'Diagnose skills, review roadmaps, and match vacancies'}
+                : 'Explore job-market trends, in-demand skills, and relevant vacancies'}
               </p>
             </div>
           </div>
