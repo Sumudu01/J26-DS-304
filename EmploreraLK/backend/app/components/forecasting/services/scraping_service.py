@@ -305,6 +305,12 @@ class ScrapingService:
         def _serialize(job: JobPosting) -> Dict[str, Any]:
             skills = job.get_skills()
             overlap = list(user_skills_lower & set(s.lower() for s in skills)) if user_skills_lower else []
+            metadata = job.get_metadata()
+            description_image_urls = metadata.get("description_image_urls", [])
+            if isinstance(description_image_urls, str):
+                description_image_urls = [description_image_urls]
+            if not isinstance(description_image_urls, list):
+                description_image_urls = []
             return {
                 "id": job.id,
                 "job_id": job.job_id,
@@ -321,6 +327,8 @@ class ScrapingService:
                 "seniority_level": job.seniority_level,
                 "experience_years_min": job.experience_years_min,
                 "description_snippet": (job.description_raw or "")[:300].strip() + "…" if job.description_raw else None,
+                "description_text": job.description_raw,
+                "description_image_urls": description_image_urls,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
             }
 
@@ -358,8 +366,7 @@ class ScrapingService:
         pipeline_id = f"pipeline_{int(time.time())}_{target_role[:6].lower().replace(' ', '_')}"
         results: Dict[str, Any] = {"pipeline_id": pipeline_id, "target_role": target_role, "stages": {}}
 
-        # Stage 1 — Data Collection
-        # fetch_full_description=False for speed — NLP agent fetches descriptions per-posting
+        # Stage 1 — Data Collection (including full descriptions for NLP)
         try:
             collection_goal = AgentCollectionGoal(
                 keywords=target_role,
@@ -367,7 +374,7 @@ class ScrapingService:
                 max_jobs=max_jobs,
                 background=True,
                 sources=["LinkedIn", "TopJobs"],
-                fetch_full_description=False,  # Skip per-job description fetch; NLP stage handles it
+                fetch_full_description=True,
                 min_delay=1.0,   # Reduced from 2.0 — still polite but 2x faster
                 max_delay=2.5,   # Reduced from 4.0
             )
@@ -467,4 +474,3 @@ class ScrapingService:
             "top_keywords": [{"keyword": k or "unspecified", "count": c} for k, c in keyword_counts],
             "forecasting_pipeline_status": "ready" if total_jobs > 0 else "awaiting_data",
         }
-
