@@ -219,7 +219,7 @@ When scraping across multiple platforms, employers frequently cross-post the ide
 ```
 
 ### Key Technical Capabilities:
-1. **Full Job Description Ingestion:** Fetches and cleans complete job description text directly from individual advertisement detail pages on both LinkedIn and TopJobs.
+1. **Full Job Description Ingestion:** Fetches and cleans text descriptions from LinkedIn and TopJobs, and preserves image-based TopJobs adverts for display. The full pipeline performs collection during the data stage (`fetch_full_description=True`); the NLP stage processes saved text and does not fetch portal pages itself.
 2. **Self-Healing Cognition:** Detects HTTP 429 rate limits, triggers adaptive exponential backoff with randomized jitter (35s+), rotates browser session pools, and refreshes User-Agent fingerprints.
 3. **Selector Fallback Tree:** Employs hierarchical CSS selectors to handle dynamic DOM layout shifts without crashing.
 4. **Episodic Memory Bank:** Preloads database indexes to guarantee cross-session deduplication.
