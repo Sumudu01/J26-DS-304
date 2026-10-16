@@ -977,9 +977,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           Real-Time
                         </span>
                       </h2>
-                      <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                        Personalized for <span className="font-semibold text-brand">{user.target_role || 'your target role'}</span> — sourced from LinkedIn &amp; TopJobs via AI pipeline
-                      </p>
                     </div>
                   </div>
 
@@ -1552,7 +1549,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           </div>
                           <div>
                             <h3 className="text-[11px] font-bold text-brand">Career Target Achieved</h3>
-                            <p className="text-[10px] text-gray-500 mt-0.5">Ready for placement as <span className="font-semibold">{careerData.target_role}</span>!</p>
                           </div>
                         </div>
                       </div>
@@ -1573,7 +1569,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                             <DollarSign className="h-4 w-4 text-indigo-300" />
                             <h3 className="text-sm font-bold text-white">Salary Insight &amp; Forecast</h3>
                           </div>
-                          <p className="text-xs text-indigo-300">Unlock your earning potential by gaining the missing skills for <span className="text-white font-semibold">{salaryData.target_role}</span></p>
                         </div>
                         <div className="text-right shrink-0 ml-4">
                           <div className="text-xs text-indigo-400 mb-0.5">Potential Uplift</div>

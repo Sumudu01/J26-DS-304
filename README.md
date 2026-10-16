@@ -159,6 +159,7 @@ The backend follows a strict 4-tier layered architecture designed for modularity
 ## 🤖 Autonomous Data Collection Agent (Component 1)
 
 The **Data Collection Agent** ([`data_collection_agent.py`](file:///e:/Sliit/Y4/RP/J26-DS-304/EmploreraLK/backend/app/components/forecasting/agents/data_collection_agent.py)) is an autonomous AI agent engineered to extract, normalize, deduplicate, and curate live job postings with full job descriptions from both **LinkedIn** and **TopJobs.lk** for the Job Market Demand Forecasting Engine.
+The collector filters both sources to IT/technology-related job titles, including internships, before fetching descriptions or saving records.
 
 ### 🌐 Supported Platforms
 1. **LinkedIn Guest Portal:**

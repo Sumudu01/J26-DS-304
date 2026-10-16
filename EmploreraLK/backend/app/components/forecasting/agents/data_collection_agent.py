@@ -22,6 +22,29 @@ from app.schemas.job_posting import AgentCollectionGoal
 
 logger = logging.getLogger("emploreralk.agents.data_collection")
 
+IT_ROLE_PATTERN = re.compile(
+    r"\b(?:"
+    r"information technology|information systems|computer science|software|programmer|programming|developer|development|"
+    r"web|frontend|front[- ]end|backend|back[- ]end|full[- ]stack|"
+    r"data scientist|data science|data engineer|data analyst|database|"
+    r"machine learning|artificial intelligence|ai engineer|"
+    r"cyber ?security|information security|penetration tester|"
+    r"network(?:ing)?|cloud|devops|site reliability|sre|"
+    r"quality assurance|software tester|qa(?: analyst| intern| tester| engineer)?|"
+    r"systems? analyst|systems? administrator|system administrator|"
+    r"technical support|it support|help ?desk|"
+    r"erp|sap consultant|salesforce|embedded systems?|"
+    r"ui/?ux|ux/?ui|user experience|user interface|"
+    r"it"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_it_related_job(title: str) -> bool:
+    """Only collect roles whose titles clearly identify an IT/technology field."""
+    return bool(title and IT_ROLE_PATTERN.search(title))
+
 
 @dataclass
 class JobData:
@@ -712,6 +735,7 @@ class LinkedInDataCollectionAgent:
 
         unique_collected_jobs: List[JobData] = []
         updated_existing_descriptions = False
+        non_it_jobs_filtered = 0
         duplicates_skipped = 0
         cross_platform_merged = 0
         rate_limit_events = 0
@@ -749,6 +773,9 @@ class LinkedInDataCollectionAgent:
 
                 parsed_job = self.topjobs_collector.parse_job_row(tr, meta)
                 if not parsed_job or not parsed_job.job_id:
+                    continue
+                if not is_it_related_job(parsed_job.title):
+                    non_it_jobs_filtered += 1
                     continue
 
                 # Deduplication check
@@ -879,6 +906,9 @@ class LinkedInDataCollectionAgent:
                     parsed_job = self.linkedin_collector.parse_job_card(card, keywords)
                     if not parsed_job or not parsed_job.job_id:
                         continue
+                    if not is_it_related_job(parsed_job.title):
+                        non_it_jobs_filtered += 1
+                        continue
 
                     # Cross-platform & intra-platform deduplication
                     is_dup, dup_reason = self._evaluate_and_deduplicate(
@@ -952,6 +982,14 @@ class LinkedInDataCollectionAgent:
         final_status = "completed" if len(unique_collected_jobs) >= max_jobs else "partial"
         if rate_limit_events > 0 and len(unique_collected_jobs) == 0:
             final_status = "rate_limited"
+
+        if non_it_jobs_filtered:
+            self._record_telemetry(
+                action="FILTER_NON_IT_POSTINGS",
+                thought="Excluded postings that are not clearly related to information technology.",
+                observation=f"Filtered {non_it_jobs_filtered} non-IT postings before persistence.",
+                status="ok"
+            )
 
         report = AgentExecutionReport(
             run_id=run_id,
