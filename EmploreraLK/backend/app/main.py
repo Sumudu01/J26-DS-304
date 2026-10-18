@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models import Base
 from app.core.security import get_password_hash
 from app.api.v1 import api_router
+from app.api.v1.matching import warm_embedding_model
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -108,6 +109,13 @@ async def lifespan(app: FastAPI):
         settings.HOST,
         settings.PORT,
     )
+
+    # ── Pre-warm the BGE-M3 embedding model in background ───────────────────
+    # Kicks off a daemon thread that loads the model from the local cache so
+    # the /matching/recommendations endpoint is ready before the first user
+    # request arrives.  Failures are logged but never crash the server.
+    warm_embedding_model()
+
     yield
     logger.info("EmploreraLK API shutting down.")
 
