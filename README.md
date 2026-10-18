@@ -159,6 +159,7 @@ The backend follows a strict 4-tier layered architecture designed for modularity
 ## 🤖 Autonomous Data Collection Agent (Component 1)
 
 The **Data Collection Agent** ([`data_collection_agent.py`](file:///e:/Sliit/Y4/RP/J26-DS-304/EmploreraLK/backend/app/components/forecasting/agents/data_collection_agent.py)) is an autonomous AI agent engineered to extract, normalize, deduplicate, and curate live job postings with full job descriptions from both **LinkedIn** and **TopJobs.lk** for the Job Market Demand Forecasting Engine.
+The collector filters both sources to IT/technology-related job titles, including internships, before fetching descriptions or saving records.
 
 ### 🌐 Supported Platforms
 1. **LinkedIn Guest Portal:**
@@ -219,7 +220,7 @@ When scraping across multiple platforms, employers frequently cross-post the ide
 ```
 
 ### Key Technical Capabilities:
-1. **Full Job Description Ingestion:** Fetches and cleans complete job description text directly from individual advertisement detail pages on both LinkedIn and TopJobs.
+1. **Full Job Description Ingestion:** Fetches and cleans text descriptions from LinkedIn and TopJobs, and preserves image-based TopJobs adverts for display. The full pipeline performs collection during the data stage (`fetch_full_description=True`); the NLP stage processes saved text and does not fetch portal pages itself. Image-based TopJobs adverts are converted to text by the NLP worker using Tesseract OCR. Docker installs the OCR engine automatically; local Windows setups need Tesseract OCR installed and `TESSERACT_CMD` set to its `tesseract.exe` path if it is not on `PATH`.
 2. **Self-Healing Cognition:** Detects HTTP 429 rate limits, triggers adaptive exponential backoff with randomized jitter (35s+), rotates browser session pools, and refreshes User-Agent fingerprints.
 3. **Selector Fallback Tree:** Employs hierarchical CSS selectors to handle dynamic DOM layout shifts without crashing.
 4. **Episodic Memory Bank:** Preloads database indexes to guarantee cross-session deduplication.
@@ -528,6 +529,13 @@ python -m spacy download en_core_web_sm
 
 # Configure environment variables
 cp .env.example .env
+```
+
+TopJobs image adverts require the Tesseract OCR executable. Docker installs it automatically. On Windows, install it and configure the executable path before starting the backend:
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR --exact
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
 ```
 
 Ensure your `.env` contains your Neon PostgreSQL credentials:
