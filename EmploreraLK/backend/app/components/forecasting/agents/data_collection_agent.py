@@ -967,17 +967,27 @@ class LinkedInDataCollectionAgent:
         db_run: Optional[DataCollectionRun] = None
         if self.db:
             try:
-                db_run = DataCollectionRun(
-                    run_id=run_id,
-                    source=",".join(active_sources_display),
-                    target_keywords=keywords,
-                    target_location=location,
-                    target_count=max_jobs,
-                    collected_count=0,
-                    duplicate_count=0,
-                    status="running"
-                )
-                self.db.add(db_run)
+                db_run = self.db.query(DataCollectionRun).filter(
+                    DataCollectionRun.run_id == run_id
+                ).first()
+                if db_run is None:
+                    db_run = DataCollectionRun(
+                        run_id=run_id,
+                        source=",".join(active_sources_display),
+                        target_keywords=keywords,
+                        target_location=location,
+                        target_count=max_jobs,
+                        collected_count=0,
+                        duplicate_count=0,
+                        status="running"
+                    )
+                    self.db.add(db_run)
+                else:
+                    db_run.source = ",".join(active_sources_display)
+                    db_run.target_keywords = keywords
+                    db_run.target_location = location
+                    db_run.target_count = max_jobs
+                    db_run.status = "running"
                 self.db.commit()
             except Exception as e:
                 logger.error("Failed to initialize DataCollectionRun in DB: %s", e)

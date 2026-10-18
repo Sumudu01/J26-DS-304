@@ -158,7 +158,8 @@ class ScrapingService:
     def trigger_collection(
         cls,
         goal: AgentCollectionGoal,
-        db: Session
+        db: Session,
+        run_id: Optional[str] = None,
     ) -> AgentRunStatus:
         """
         Trigger an autonomous agent data collection session across configured job portals.
@@ -166,7 +167,7 @@ class ScrapingService:
         Otherwise executes synchronously.
         """
         sources_label = ",".join(goal.sources) if goal.sources else "LinkedIn,TopJobs,Rooster.jobs"
-        run_id = f"run_{int(time.time())}_{goal.keywords[:4].lower().replace(' ', '_')}"
+        run_id = run_id or f"run_{int(time.time())}_{goal.keywords[:4].lower().replace(' ', '_')}"
 
         if goal.background:
             _ACTIVE_RUNS[run_id] = {
@@ -478,6 +479,7 @@ class ScrapingService:
         1. Data Collection Agent (LinkedIn + TopJobs + Rooster.jobs)
         2. NLP Extraction Agent
         3. Skill Processing Agent
+        4. Job Posting Time-Series Agent
         Returns a pipeline run summary with individual run IDs.
         """
         from app.schemas.job_posting import AgentCollectionGoal
@@ -485,6 +487,9 @@ class ScrapingService:
         from app.schemas.skill_processing import SkillProcessingGoal
         from app.components.forecasting.services.nlp_service import NLPService
         from app.components.forecasting.services.skill_processing_service import SkillProcessingService
+        from app.components.forecasting.agents.job_posting_time_series_agent import (
+            JobPostingTimeSeriesAgent,
+        )
 
         import time
         pipeline_id = f"pipeline_{int(time.time())}_{target_role[:6].lower().replace(' ', '_')}"
@@ -566,6 +571,24 @@ class ScrapingService:
             except Exception as e3:
                 logger.error("Pipeline stage 3 (skill processing) failed: %s", e3)
                 results["stages"]["skill_processing"] = {"status": "failed", "error": str(e3)}
+            try:
+                time_series = JobPostingTimeSeriesAgent.get_series(
+                    _db3,
+                    days=730,
+                    interval="month",
+                )
+                results["stages"]["time_series"] = {
+                    "status": "completed",
+                    "total_dated_jobs": time_series["total_dated_jobs"],
+                    "interval": time_series["interval"],
+                    "points": len(time_series["points"]),
+                }
+            except Exception as e4:
+                logger.exception("Pipeline stage 4 (time-series aggregation) failed: %s", e4)
+                results["stages"]["time_series"] = {
+                    "status": "failed",
+                    "error": str(e4),
+                }
             finally:
                 _db3.close()
 
@@ -575,7 +598,7 @@ class ScrapingService:
         results["status"] = "running"
         results["message"] = (
             f"Full pipeline triggered for '{target_role}'. "
-            "Data Collection → NLP Extraction → Skill Processing running autonomously."
+            "Data Collection → NLP Extraction → Skill Processing → Time-Series Analysis running autonomously."
         )
         return results
 

@@ -217,4 +217,3 @@ class SkillProcessingRun(Base):
 
     def set_summary(self, data: Dict[str, Any]) -> None:
         self.execution_summary = json.dumps(data)
-

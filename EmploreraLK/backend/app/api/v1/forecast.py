@@ -11,6 +11,10 @@ from app.schemas.job_posting import (
 )
 from app.components.forecasting.services.scraping_service import ScrapingService
 from app.components.forecasting.services.forecasting_service import ForecastingService
+from app.components.forecasting.agents.job_posting_time_series_agent import (
+    JobPostingTimeSeriesAgent,
+    TimeSeriesInterval,
+)
 
 logger = logging.getLogger("emploreralk.api.forecast")
 
@@ -112,6 +116,23 @@ def get_collection_stats(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     return ScrapingService.get_collection_statistics(db=db)
+
+
+@router.get(
+    "/jobs/time-series",
+    response_model=Dict[str, Any],
+    summary="Get job-posting and skill time series",
+    description=(
+        "Aggregate dated job postings and extracted skills over up to 730 days. "
+        "Includes the newest and older postings available in the database."
+    ),
+)
+def get_job_posting_time_series(
+    days: int = Query(730, ge=1, le=730),
+    interval: TimeSeriesInterval = Query("month"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return JobPostingTimeSeriesAgent.get_series(db, days=days, interval=interval)
 
 
 @router.get(
