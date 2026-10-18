@@ -179,6 +179,13 @@ backend/credentials/
 backend/google_token.json
 backend/*_credentials.json
 backend/*_service_account.json
+# Google Drive CV storage: service-account key and OAuth token (keep outside the repo)
+emploreralk-cv-*.json
+emploreralk-oauth-*.json
+*gdrive*token*.json
+
+# Uploaded CVs (personal data) from the local storage backend
+backend/app/data/cv_storage/
 
 # JWT / secret key files
 *.pem
