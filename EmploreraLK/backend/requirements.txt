@@ -15,4 +15,9 @@ requests>=2.31.0
 beautifulsoup4>=4.12.0
 pandas>=2.2.0
 spacy>=3.8.0
+<<<<<<< HEAD
 pypdf>=4.0.0
+=======
+Pillow>=10.0.0
+pytesseract>=0.3.13
+>>>>>>> 2bb28ee60332b4cf74f61a35e20a8aed89379cd4

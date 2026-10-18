@@ -2,8 +2,9 @@
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
 import DemandInsightsPanel from './DemandInsightsPanel.jsx'
+import CandidateProfileCollection from './CandidateProfileCollection.jsx'
 import TargetRoleInput from './TargetRoleInput.jsx'
-import { createNotification } from './notificationsApi.js'
+import { createNotification, getAuthHeaders } from './notificationsApi.js'
 import { API_URL } from '../App'
 import {
   TrendingUp, FileSearch, Milestone, CheckSquare,
@@ -46,6 +47,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [searchError, setSearchError] = useState('')
   const [hasSearched, setHasSearched] = useState(false)
   const [gapData, setGapData] = useState(null)
+  const [gapError, setGapError] = useState('')
   const [careerData, setCareerData] = useState(null)
   const [matchedJobs, setMatchedJobs] = useState([])
   const [matchingTotal, setMatchingTotal] = useState(0)
@@ -170,18 +172,21 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   const fetchGapAnalysis = async (targetRole = user.target_role) => {
     setIsSearchingGap(true)
+    setGapError('')
     try {
       const res = await fetch(`${API_URL}/skill-gap`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ skills: user.skills, target_role: targetRole })
       })
       const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || data.error || `Could not analyze this role (HTTP ${res.status})`)
       setGapData(data)
       // Re-fetch salary insights with accurate missing skills
       fetchSalaryInsights(data.missing_skills || [])
     } catch (e) {
       console.error("Error loading gap analysis", e)
+      setGapError(e.message || 'Could not load skill-gap analysis.')
     } finally {
       setIsSearchingGap(false)
     }
@@ -352,12 +357,13 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       } catch (notificationError) {
         console.error('Could not save job search notification', notificationError)
       }
-      // Poll for new listings every 10s up to 3 times (stops when data arrives)
+      // Refresh both job views while background collection saves the new postings.
       let pollCount = 0
       const poll = setInterval(async () => {
         pollCount++
         await fetchLiveJobs(1, liveJobsSource)
-        if (pollCount >= 3) clearInterval(poll)
+        await fetchMatchingJobs(jobSearchQuery, matchingPage, matchingSource)
+        if (pollCount >= 12) clearInterval(poll)
       }, 10000)
     } catch (e) {
       console.error('Pipeline trigger error', e)
@@ -732,9 +738,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                 {activeTab === 'profile' && 'My Profile'}
               </h1>
               <p className="hidden sm:block text-xs text-gray-500 mt-0.5">
+<<<<<<< HEAD
                 {activeTab === 'profile'
                   ? 'Manage your skills, target role, and upload your CV'
                   : 'Diagnose skills, review roadmaps, and match vacancies'}
+=======
+              {activeTab === 'profile'
+                ? 'Manage your skills, target role, and upload your CV'
+                : 'Explore job-market trends, in-demand skills, and relevant vacancies'}
+>>>>>>> 2bb28ee60332b4cf74f61a35e20a8aed89379cd4
               </p>
             </div>
           </div>
@@ -1065,6 +1077,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               </div>
 
               {demandSubView === 'listings' && (
+<<<<<<< HEAD
                 <>
                   {/* ── LIVE JOB LISTINGS FROM AGENTIC PIPELINE ── */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1086,6 +1099,146 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                             Personalized for <span className="font-semibold text-brand">{user.target_role || 'your target role'}</span> — sourced from LinkedIn &amp; TopJobs via AI pipeline
                           </p>
                         </div>
+=======
+              <>
+              {/* ── LIVE JOB LISTINGS FROM AGENTIC PIPELINE ── */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                {/* Section header */}
+                <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-brand/5 to-indigo-50/60 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                  <div className="flex items-start sm:items-center space-x-3 min-w-0">
+                    <div className="p-2 bg-brand/10 rounded-lg shrink-0">
+                      <Briefcase className="h-4 w-4 text-brand" />
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="text-base font-bold text-gray-900 flex flex-wrap items-center gap-2">
+                        Live Job Listings
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-full animate-pulse">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                          Real-Time
+                        </span>
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* Controls row */}
+                  <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
+                    {/* Source filter */}
+                    <select
+                      value={liveJobsSource}
+                      onChange={(e) => { setLiveJobsSource(e.target.value); fetchLiveJobs(1, e.target.value) }}
+                      className="flex-1 sm:flex-none min-w-0 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:ring-2 focus:ring-brand/20 outline-none"
+                    >
+                      <option value="">All Sources</option>
+                      <option value="LinkedIn">LinkedIn</option>
+                      <option value="TopJobs">TopJobs</option>
+                    </select>
+
+                    {/* Refresh button */}
+                    <button
+                      onClick={() => fetchLiveJobs(1, liveJobsSource)}
+                      disabled={liveJobsLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand border border-brand/20 bg-brand/5 rounded-lg hover:bg-brand/10 transition-all disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${liveJobsLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+
+                    {/* Pipeline trigger button */}
+                    <button
+                      onClick={triggerPipeline}
+                      disabled={pipelineTriggerLoading || pipelineStatus === 'triggered'}
+                      title="Run full 4-agent pipeline to collect & process fresh job data"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                        pipelineStatus === 'triggered'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-brand text-white hover:bg-brand-dark shadow-sm'
+                      } disabled:opacity-60`}
+                    >
+                      <Zap className="h-3.5 w-3.5 shrink-0" />
+                      {pipelineStatus === 'triggered' ? 'Running…' : <><span className="sm:hidden">Pipeline</span><span className="hidden sm:inline">Run AI Pipeline</span></>}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pipeline status banner */}
+                {pipelineStatus === 'triggered' && (
+                  <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3 text-xs text-blue-700">
+                    <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
+                    <div>
+                      <p className="font-bold">Autonomous Pipeline Running</p>
+                      <p className="text-blue-600 mt-0.5">Data Collection Agent → NLP Extraction Agent → Skill Processing Agent are operating in background. New listings will appear within ~30 seconds.</p>
+                    </div>
+                  </div>
+                )}
+                {pipelineStatus === 'error' && (
+                  <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-600">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    Pipeline trigger failed. Please ensure the backend is running and try again.
+                  </div>
+                )}
+
+                {/* Body */}
+                <div className="p-4 sm:p-6">
+                  {liveJobsLoading && liveJobs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-gray-400 space-y-3">
+                      <RefreshCw className="h-8 w-8 animate-spin text-brand/40" />
+                      <p className="text-sm font-medium">Fetching live job listings…</p>
+                    </div>
+                  ) : liveJobsError ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                      <div className="p-3 bg-amber-50 rounded-full">
+                        <AlertTriangle className="h-6 w-6 text-amber-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">No live listings yet</p>
+                        <p className="text-xs text-gray-400 mt-1">{liveJobsError}</p>
+                      </div>
+                      <button
+                        onClick={triggerPipeline}
+                        className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm"
+                      >
+                        <Zap className="h-4 w-4" />
+                        Start Data Collection Pipeline
+                      </button>
+                    </div>
+                  ) : liveJobs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                      <div className="p-3 bg-gray-50 rounded-full">
+                        <Briefcase className="h-6 w-6 text-gray-300" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">
+                          {hasSearched && searchQuery.trim()
+                            ? `No listings match “${searchQuery.trim()}”`
+                            : 'No job listings collected yet'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {hasSearched && searchQuery.trim()
+                            ? 'Try another job title or skill keyword, or clear search to return to recommended roles.'
+                            : 'Trigger the AI pipeline to collect live job posts from LinkedIn & TopJobs for your target role.'}
+                        </p>
+                      </div>
+                      {!(hasSearched && searchQuery.trim()) && (
+                      <button
+                        onClick={triggerPipeline}
+                        disabled={pipelineTriggerLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-60"
+                      >
+                        <Zap className="h-4 w-4" />
+                        {pipelineTriggerLoading ? 'Starting…' : 'Run AI Pipeline Now'}
+                      </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {/* Stats row */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
+                        <p className="text-xs text-gray-500 break-words">
+                          <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found
+                          {liveJobsSource && <span className="ml-1 text-gray-400">from {liveJobsSource}</span>}
+                        </p>
+                        <span className="text-[10px] text-gray-400 shrink-0">Ranked by skill match</span>
+>>>>>>> 2bb28ee60332b4cf74f61a35e20a8aed89379cd4
                       </div>
 
                       {/* Controls row */}
@@ -1299,7 +1452,88 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                                   </div>
                                 </div>
                               </div>
+<<<<<<< HEAD
                             ))}
+=======
+
+                              {/* Description snippet */}
+                              {job.description_snippet && (
+                                <p className="mt-2 text-xs text-gray-500 leading-relaxed line-clamp-2">
+                                  {job.description_snippet}
+                                </p>
+                              )}
+                              {job.description_text && (
+                                <details className="mt-2 text-xs text-gray-600">
+                                  <summary className="cursor-pointer font-semibold text-brand hover:text-brand-dark">
+                                    Read full description
+                                  </summary>
+                                  <p className="mt-2 whitespace-pre-line leading-relaxed">
+                                    {job.description_text}
+                                  </p>
+                                </details>
+                              )}
+                              {job.description_image_urls?.length > 0 && (
+                                <div className="mt-3 space-y-2">
+                                  {job.description_image_urls.map((imageUrl, imageIndex) => (
+                                    <a
+                                      key={`${job.job_id}-advert-${imageIndex}`}
+                                      href={imageUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="block"
+                                    >
+                                      <img
+                                        src={imageUrl}
+                                        alt={`${job.title} job advertisement`}
+                                        loading="lazy"
+                                        className="max-h-80 w-full rounded-lg border border-gray-100 bg-gray-50 object-contain object-left"
+                                        onError={(event) => { event.currentTarget.hidden = true }}
+                                      />
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Skill overlap badges */}
+                              {job.skill_overlap && job.skill_overlap.length > 0 && (
+                                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                  {job.skill_overlap.slice(0, 6).map((sk, si) => (
+                                    <span key={si} className="px-2 py-0.5 bg-brand/8 text-brand text-[10px] font-semibold rounded-full border border-brand/15">
+                                      ✓ {sk}
+                                    </span>
+                                  ))}
+                                  {job.skill_overlap.length > 6 && (
+                                    <span className="text-[10px] text-gray-400">+{job.skill_overlap.length - 6} more</span>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Footer row */}
+                              <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  {/* Source badge */}
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    job.source === 'LinkedIn'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-orange-100 text-orange-700'
+                                  }`}>
+                                    {job.source}
+                                  </span>
+                                  {job.posted_date_text && (
+                                    <span className="text-[10px] text-gray-400">{job.posted_date_text}</span>
+                                  )}
+                                </div>
+                                <a
+                                  href={job.job_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-xs font-semibold text-brand hover:text-brand-dark transition-colors"
+                                >
+                                  View Job <ExternalLink className="h-3 w-3" />
+                                </a>
+                              </div>
+                            </div>
+>>>>>>> 2bb28ee60332b4cf74f61a35e20a8aed89379cd4
                           </div>
 
                           {/* Pagination */}
@@ -1371,6 +1605,8 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* TAB 2: SKILL GAP DISCOVERY */}
           {activeTab === 'gap' && (
             <div className="space-y-6">
+              <CandidateProfileCollection />
+
               <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                 <h2 className="text-base font-bold text-gray-900">Skill Gap Discovery & Target Alignment</h2>
                 <p className="text-xs text-gray-500 mt-1 mb-5">
@@ -1552,7 +1788,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                 </>
               ) : (
-                <div className="h-64 flex items-center justify-center text-sm text-gray-500">Retrieving diagnostics...</div>
+                <div className="h-64 flex items-center justify-center text-sm text-gray-500">
+                  {gapError ? <p role="alert" className="max-w-xl text-center text-red-700">{gapError}</p> : 'Retrieving diagnostics...'}
+                </div>
               )}
             </div>
           )}
@@ -1622,7 +1860,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           </div>
                           <div>
                             <h3 className="text-[11px] font-bold text-brand">Career Target Achieved</h3>
-                            <p className="text-[10px] text-gray-500 mt-0.5">Ready for placement as <span className="font-semibold">{careerData.target_role}</span>!</p>
                           </div>
                         </div>
                       </div>
@@ -1643,7 +1880,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                             <DollarSign className="h-4 w-4 text-indigo-300" />
                             <h3 className="text-sm font-bold text-white">Salary Insight &amp; Forecast</h3>
                           </div>
-                          <p className="text-xs text-indigo-300">Unlock your earning potential by gaining the missing skills for <span className="text-white font-semibold">{salaryData.target_role}</span></p>
                         </div>
                         <div className="text-right shrink-0 ml-4">
                           <div className="text-xs text-indigo-400 mb-0.5">Potential Uplift</div>
@@ -1982,7 +2218,11 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     return (
                       <article key={job.id || job.job_id} className="group rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-brand/30 hover:shadow-md sm:p-5">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+<<<<<<< HEAD
                           <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div>{job.llm_reasoning && <div className="mt-3 rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-[11px] text-cyan-950"><p className="font-bold">AI alignment reasoning: {String(job.llm_reasoning.recommendation || 'review')}</p>{job.llm_reasoning.fit_summary && <p className="mt-1 leading-relaxed">{job.llm_reasoning.fit_summary}</p>}{Array.isArray(job.llm_reasoning.skill_gaps) && job.llm_reasoning.skill_gaps.length > 0 && <p className="mt-1"><span className="font-semibold">Skill gaps:</span> {job.llm_reasoning.skill_gaps.join(', ')}</p>}</div>}</div></div>
+=======
+                          <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}{job.description_text && <details className="mt-2 text-xs text-gray-600"><summary className="cursor-pointer font-semibold text-brand hover:text-brand-dark">Read full description</summary><p className="mt-2 whitespace-pre-line leading-relaxed">{job.description_text}</p></details>}{job.description_image_urls?.length > 0 && <div className="mt-3 space-y-2">{job.description_image_urls.map((imageUrl, imageIndex) => <a key={`${job.job_id}-advert-${imageIndex}`} href={imageUrl} target="_blank" rel="noopener noreferrer" className="block"><img src={imageUrl} alt={`${job.title} job advertisement`} loading="lazy" className="max-h-80 w-full rounded-lg border border-gray-100 bg-gray-50 object-contain object-left" onError={(event) => { event.currentTarget.hidden = true }} /></a>)}</div>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div></div></div>
+>>>>>>> 2bb28ee60332b4cf74f61a35e20a8aed89379cd4
                           <div className="flex shrink-0 items-center justify-between gap-4 border-t border-gray-100 pt-3 lg:w-32 lg:flex-col lg:items-center lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0"><div className="text-center"><p className={`text-2xl font-black ${matchScore >= 70 ? 'text-emerald-600' : matchScore >= 40 ? 'text-amber-600' : 'text-gray-500'}`}>{matchScore}%</p><p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Skill fit</p><p className="mt-1 text-[10px] text-gray-400">{job.skill_match_count} shared skill{job.skill_match_count === 1 ? '' : 's'}</p></div>{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-dark">View role <ExternalLink className="h-3 w-3" /></a> : <span className="text-[10px] text-gray-400">Link unavailable</span>}</div>
                         </div>
                       </article>
