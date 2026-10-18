@@ -1,0 +1,5 @@
+# Optional local/worker dependencies for NLP and BGE-M3 embeddings.
+# Keep these out of Vercel's serverless function dependency set.
+sentence-transformers>=3.0.0
+sentencepiece>=0.2.0
+protobuf>=5.0.0
