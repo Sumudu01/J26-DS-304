@@ -365,6 +365,7 @@ class ScrapingService:
         import time
         pipeline_id = f"pipeline_{int(time.time())}_{target_role[:6].lower().replace(' ', '_')}"
         results: Dict[str, Any] = {"pipeline_id": pipeline_id, "target_role": target_role, "stages": {}}
+        collection_run_id: Optional[str] = None
 
         # Stage 1 — Data Collection (including full descriptions for NLP)
         try:
@@ -384,6 +385,7 @@ class ScrapingService:
                 "run_id": collection_status.run_id,
                 "status": collection_status.status,
             }
+            collection_run_id = collection_status.run_id
             if db is None:
                 _db.close()
         except Exception as e:
@@ -393,10 +395,30 @@ class ScrapingService:
         # Stage 2 — NLP Extraction (background thread)
         def _run_nlp_then_skills():
             import time as _t
-            _t.sleep(5)  # Reduced from 10s — allow collection agent a short head-start
+            collection_deadline = time.monotonic() + 1800
+            while (
+                collection_run_id
+                and _ACTIVE_RUNS.get(collection_run_id, {}).get("status") == "running"
+                and time.monotonic() < collection_deadline
+            ):
+                _t.sleep(1)
+
+            collection_state = _ACTIVE_RUNS.get(collection_run_id or "", {})
+            if collection_state.get("status") == "running":
+                logger.error(
+                    "Collection run %s did not finish before NLP OCR processing began.",
+                    collection_run_id,
+                )
+                return
+            if collection_state.get("status") == "failed":
+                logger.error(
+                    "Collection run %s failed; continuing NLP with previously saved postings.",
+                    collection_run_id,
+                )
+
             _db2 = SessionLocal()
             try:
-                nlp_goal = NLPExtractionGoal(limit=max_jobs, background=False)
+                nlp_goal = NLPExtractionGoal(batch_size=max_jobs, background=False)
                 nlp_status = NLPService.trigger_extraction(goal=nlp_goal, db=_db2)
                 results["stages"]["nlp_extraction"] = {
                     "run_id": nlp_status.run_id,
