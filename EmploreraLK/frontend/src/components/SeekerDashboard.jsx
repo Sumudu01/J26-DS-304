@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
 import DemandInsightsPanel from './DemandInsightsPanel.jsx'
+import CandidateProfileCollection from './CandidateProfileCollection.jsx'
 import TargetRoleInput from './TargetRoleInput.jsx'
-import { createNotification } from './notificationsApi.js'
+import { createNotification, getAuthHeaders } from './notificationsApi.js'
 import { API_URL } from '../App'
 import { 
   TrendingUp, FileSearch, Milestone, CheckSquare, 
@@ -44,6 +45,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [searchError, setSearchError] = useState('')
   const [hasSearched, setHasSearched] = useState(false)
   const [gapData, setGapData] = useState(null)
+  const [gapError, setGapError] = useState('')
   const [careerData, setCareerData] = useState(null)
   const [matchedJobs, setMatchedJobs] = useState([])
   const [matchingTotal, setMatchingTotal] = useState(0)
@@ -141,18 +143,21 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   const fetchGapAnalysis = async (targetRole = user.target_role) => {
     setIsSearchingGap(true)
+    setGapError('')
     try {
       const res = await fetch(`${API_URL}/skill-gap`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ skills: user.skills, target_role: targetRole })
       })
       const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || data.error || `Could not analyze this role (HTTP ${res.status})`)
       setGapData(data)
       // Re-fetch salary insights with accurate missing skills
       fetchSalaryInsights(data.missing_skills || [])
     } catch (e) {
       console.error("Error loading gap analysis", e)
+      setGapError(e.message || 'Could not load skill-gap analysis.')
     } finally {
       setIsSearchingGap(false)
     }
@@ -1293,6 +1298,8 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* TAB 2: SKILL GAP DISCOVERY */}
           {activeTab === 'gap' && (
             <div className="space-y-6">
+              <CandidateProfileCollection />
+
               <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                 <h2 className="text-base font-bold text-gray-900">Skill Gap Discovery & Target Alignment</h2>
                 <p className="text-xs text-gray-500 mt-1 mb-5">
@@ -1474,7 +1481,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                 </>
               ) : (
-                <div className="h-64 flex items-center justify-center text-sm text-gray-500">Retrieving diagnostics...</div>
+                <div className="h-64 flex items-center justify-center text-sm text-gray-500">
+                  {gapError ? <p role="alert" className="max-w-xl text-center text-red-700">{gapError}</p> : 'Retrieving diagnostics...'}
+                </div>
               )}
             </div>
           )}
