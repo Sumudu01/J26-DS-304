@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react'
+﻿import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
 import DemandInsightsPanel from './DemandInsightsPanel.jsx'
 import TargetRoleInput from './TargetRoleInput.jsx'
 import { createNotification } from './notificationsApi.js'
 import { API_URL } from '../App'
-import { 
-  TrendingUp, FileSearch, Milestone, CheckSquare, 
-  User, Upload, BookOpen, GraduationCap, Briefcase, 
+import {
+  TrendingUp, FileSearch, Milestone, CheckSquare,
+  User, Upload, BookOpen, GraduationCap, Briefcase,
   MapPin, DollarSign, ExternalLink, RefreshCw, CheckCircle2, ChevronRight,
   LogOut, X, Search, ArrowUpRight, BarChart3, Layers, Zap, AlertTriangle, Menu, ChevronLeft,
   Target, Filter, Clock3, Sparkles
@@ -29,6 +29,8 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [cvFile, setCvFile] = useState(null)
   const [cvUploadLoading, setCvUploadLoading] = useState(false)
   const [cvSuccessMsg, setCvSuccessMsg] = useState('')
+  const [cvErrorMsg, setCvErrorMsg] = useState('')
+  const [savedCv, setSavedCv] = useState(null)
 
   // API response states
   const [demandData] = useState([])
@@ -48,9 +50,12 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [matchedJobs, setMatchedJobs] = useState([])
   const [matchingTotal, setMatchingTotal] = useState(0)
   const [matchingPage, setMatchingPage] = useState(1)
+  const [matchingTotalPages, setMatchingTotalPages] = useState(1)
   const [matchingSource, setMatchingSource] = useState('')
   const [matchingError, setMatchingError] = useState('')
-  
+  // true while the backend 503s with warming=true (model still loading at startup)
+  const [matchingWarmingUp, setMatchingWarmingUp] = useState(false)
+
   // UI states
   const [loading, setLoading] = useState(false)
   const [appliedJobIds, setAppliedJobIds] = useState(new Set())
@@ -83,12 +88,36 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [graphWidth, setGraphWidth] = useState(800)
   const userSkillsKey = Array.isArray(user.skills) ? user.skills.join(',') : user.skills || ''
 
+  // Centralised 401 handler — called whenever an authenticated fetch returns
+  // 401 Unauthorized.  Clears the stale token and redirects to login so the
+  // user is never stuck on a broken dashboard full of auth errors.
+  const handle401 = () => {
+    localStorage.removeItem('emploeralk_token')
+    localStorage.removeItem('emploeralk_user')
+    onLogout()
+  }
+
   useEffect(() => {
     Promise.resolve().then(() => {
       setEditSkills(Array.isArray(user.skills) ? user.skills.join(', ') : user.skills || '')
       setEditTargetRole(user.target_role || '')
     })
   }, [user.skills, user.target_role])
+
+  useEffect(() => {
+    const token = localStorage.getItem('emploeralk_token')
+    fetch(`${API_URL}/profile/cv`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+      .then(async (res) => {
+        if (res.status === 401) { handle401(); return null }
+        if (res.status === 404) return null
+        if (!res.ok) throw new Error('Could not load saved CV details.')
+        return res.json()
+      })
+      .then(setSavedCv)
+      .catch(() => setSavedCv(null))
+  }, [user.email])
 
   useEffect(() => {
     const handleResize = () => {
@@ -193,28 +222,63 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const fetchMatchingJobs = async (query = '', page = 1, source = matchingSource) => {
     setIsSearchingJobs(true)
     setMatchingError('')
+    setMatchingWarmingUp(false)
+
+    // 180-second abort for the very first cold start when the FAISS index is
+    // being built from scratch.  After the index is saved to disk all
+    // subsequent requests complete in ~1-2 s so this timer never fires.
+    const controller = new AbortController()
+    const abortTimer = setTimeout(() => controller.abort(), 180000)
+
     try {
-      const skillsParam = Array.isArray(user.skills) ? user.skills.join(',') : (user.skills || '')
+      const PAGE_SIZE = 12
       const params = new URLSearchParams({
-        skills: skillsParam,
+        top_k: '50',
+        rerank_top_k: '50',
+        reasoning_top_k: '3',
         page: String(page),
-        page_size: '12',
+        page_size: String(PAGE_SIZE),
       })
-      if (user.target_role) params.set('target_role', user.target_role)
-      if (query.trim()) params.set('keyword', query.trim())
-      if (source) params.set('source', source)
-      const res = await fetch(`${API_URL}/forecast/jobs/recommended?${params.toString()}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const res = await fetch(`${API_URL}/matching/recommendations?${params.toString()}`, {
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('emploeralk_token') || ''}`
+        }
+      })
       const data = await res.json()
+
+      // 503 with warming=true → model still starting up; auto-retry after 15 s
+      if (!res.ok && res.status === 503 && data?.detail?.warming) {
+        setMatchingWarmingUp(true)
+        setIsSearchingJobs(false)
+        clearTimeout(abortTimer)
+        setTimeout(() => fetchMatchingJobs(query, page, source), 15000)
+        return
+      }
+
+      if (res.status === 401) { handle401(); return }
+      if (!res.ok) throw new Error(data.detail?.message || data.detail || data.error || `HTTP ${res.status}`)
+      setMatchingWarmingUp(false)
       setMatchedJobs(data.items || [])
-      setMatchingTotal(data.total_matched || 0)
+      // total_available = full FAISS index size (used for pagination math)
+      setMatchingTotal(data.total_available ?? data.total ?? data.total_matched ?? 0)
+      // Use server-computed total_pages when available
+      setMatchingTotalPages(data.total_pages ?? Math.ceil((data.total_available ?? 1) / 12) ?? 1)
       setMatchingPage(page)
     } catch (e) {
-      console.error("Error loading matched jobs", e)
-      setMatchedJobs([])
-      setMatchingTotal(0)
-      setMatchingError('Could not load matching jobs. Check that the backend is running and try again.')
+      if (e.name === 'AbortError') {
+        setMatchingError('Building job index for the first time — this takes a few minutes on first run. The page will auto-retry shortly.')
+        setTimeout(() => fetchMatchingJobs(query, page, source), 20000)
+      } else if (e.message && e.message.toLowerCase().includes('could not validate credentials')) {
+        handle401()
+      } else {
+        console.error('Error loading matched jobs', e)
+        setMatchedJobs([])
+        setMatchingTotal(0)
+        setMatchingError(e.message || 'Could not load matching jobs. Check that the backend is running and try again.')
+      }
     } finally {
+      clearTimeout(abortTimer)
       setIsSearchingJobs(false)
     }
   }
@@ -461,36 +525,88 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     }
   }
 
-  // Mock CV Upload
   const handleCvUpload = async (e) => {
     e.preventDefault()
     if (!cvFile) return
-    
+
     setCvUploadLoading(true)
     setCvSuccessMsg('')
-    
+    setCvErrorMsg('')
+
     const formData = new FormData()
     formData.append('cv', cvFile)
     formData.append('email', user.email)
-    
+
     try {
-      const res = await fetch(`${API_URL}/seeker/upload-cv`, {
+      const res = await fetch(`${API_URL}/profile/upload-cv?email=${encodeURIComponent(user.email)}`, {
         method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('emploeralk_token') || ''}`
+        },
         body: formData
       })
       const data = await res.json()
-      if (res.ok) {
-        onUpdateUser(data.user)
-        setEditSkills(data.user.skills.join(', '))
-        setCvSuccessMsg(`Successfully parsed ${data.filename}! Added advanced skills.`)
-        setCvFile(null)
-        // Reset file input
-        document.getElementById('cv-file-input').value = ''
+      if (res.status === 401) { handle401(); return }
+      if (!res.ok) throw new Error(data.error || data.detail || 'Could not parse the CV.')
+
+      onUpdateUser(data.user)
+      setEditSkills(data.user.skills.join(', '))
+      const persistedCv = {
+        filename: data.filename,
+        parsed: data.cv,
+        uploadedAt: new Date().toISOString(),
+        downloadUrl: data.download_url
       }
+      setSavedCv({ ...data, ...persistedCv })
+      setCvSuccessMsg(`Successfully parsed ${data.filename}! Added advanced skills.`)
+      setCvFile(null)
+      document.getElementById('cv-file-input').value = ''
     } catch (e) {
       console.error("Error uploading CV", e)
+      setCvErrorMsg(e.message || 'Could not parse the CV.')
     } finally {
       setCvUploadLoading(false)
+    }
+  }
+
+  const handleRemoveCv = () => {
+    fetch(`${API_URL}/profile/cv`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('emploeralk_token') || ''}`
+      }
+    })
+      .then(async (res) => {
+        if (res.status === 401) { handle401(); return }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || data.detail || 'Could not remove the saved CV.')
+        }
+        setSavedCv(null)
+        setCvSuccessMsg('Saved CV details removed from the server.')
+        setCvErrorMsg('')
+      })
+      .catch((error) => setCvErrorMsg(error.message))
+  }
+
+  const handleDownloadCv = async () => {
+    try {
+      const res = await fetch(`${API_URL}/profile/cv/download`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('emploeralk_token') || ''}`
+        }
+      })
+      if (res.status === 401) { handle401(); return }
+      if (!res.ok) throw new Error('Could not download the saved CV.')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = savedCv.filename || 'cv'
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setCvErrorMsg(error.message)
     }
   }
 
@@ -506,9 +622,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
     <div className="flex-1 flex flex-col md:flex-row min-h-screen relative">
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-gray-900/50 z-40 md:hidden" 
-          onClick={() => setIsSidebarOpen(false)} 
+        <div
+          className="fixed inset-0 bg-gray-900/50 z-40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
@@ -529,11 +645,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           <button
             onClick={() => setActiveTab('demand')}
-            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'demand'
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'demand'
                 ? 'bg-brand text-white shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100'
-            }`}
+              }`}
           >
             <TrendingUp className="h-4 w-4 shrink-0" />
             <span>Market Forecasts</span>
@@ -541,11 +656,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           <button
             onClick={() => setActiveTab('gap')}
-            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'gap'
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'gap'
                 ? 'bg-brand text-white shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100'
-            }`}
+              }`}
           >
             <FileSearch className="h-4 w-4 shrink-0" />
             <span>Skill Gap Discovery</span>
@@ -553,11 +667,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           <button
             onClick={() => setActiveTab('path')}
-            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'path'
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'path'
                 ? 'bg-brand text-white shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100'
-            }`}
+              }`}
           >
             <Milestone className="h-4 w-4 shrink-0" />
             <span>Career Path Planning</span>
@@ -565,11 +678,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
           <button
             onClick={() => setActiveTab('matching')}
-            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'matching'
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'matching'
                 ? 'bg-brand text-white shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100'
-            }`}
+              }`}
           >
             <CheckSquare className="h-4 w-4 shrink-0" />
             <span>Skill Matching &amp; Jobs</span>
@@ -583,11 +695,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* Profile nav link */}
           <button
             onClick={() => setActiveTab('profile')}
-            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'profile'
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'profile'
                 ? 'bg-brand text-white shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100'
-            }`}
+              }`}
           >
             <User className="h-4 w-4 shrink-0" />
             <div className="text-left">
@@ -606,24 +717,24 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
         <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0 flex items-center justify-between gap-2 relative min-w-0">
           {/* Left – page title */}
           <div className="flex items-center space-x-3 min-w-0">
-            <button 
-              onClick={() => setIsSidebarOpen(true)} 
+            <button
+              onClick={() => setIsSidebarOpen(true)}
               className="md:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg"
             >
               <Menu className="h-5 w-5" />
             </button>
             <div>
               <h1 className="text-lg sm:text-xl font-bold text-gray-900 truncate">
-                {activeTab === 'demand'   && 'Market Forecasts'}
-                {activeTab === 'gap'      && 'Skill Gap Discovery'}
-                {activeTab === 'path'     && 'Career Path Planning'}
+                {activeTab === 'demand' && 'Market Forecasts'}
+                {activeTab === 'gap' && 'Skill Gap Discovery'}
+                {activeTab === 'path' && 'Career Path Planning'}
                 {activeTab === 'matching' && 'Skill Matching & Jobs'}
-                {activeTab === 'profile'  && 'My Profile'}
+                {activeTab === 'profile' && 'My Profile'}
               </h1>
               <p className="hidden sm:block text-xs text-gray-500 mt-0.5">
-              {activeTab === 'profile'
-                ? 'Manage your skills, target role, and upload your CV'
-                : 'Diagnose skills, review roadmaps, and match vacancies'}
+                {activeTab === 'profile'
+                  ? 'Manage your skills, target role, and upload your CV'
+                  : 'Diagnose skills, review roadmaps, and match vacancies'}
               </p>
             </div>
           </div>
@@ -631,15 +742,15 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
           {/* Right – Notification bell & Logout */}
           <div className="flex items-center space-x-2 sm:space-x-4 shrink-0">
             <NotificationCenter />
-          <button
-            onClick={onLogout}
-            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Logout</span>
-          </button>
-        </div>
-      </header>
+            <button
+              onClick={onLogout}
+              className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-all shadow-sm focus:outline-none"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
+        </header>
 
         {/* Tab Contents */}
         <section className="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto overflow-x-hidden">
@@ -747,10 +858,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                             <Zap className="h-3.5 w-3.5 text-amber-500" />
                             <span className="text-[10px] font-semibold text-gray-400 uppercase">Status</span>
                           </div>
-                          <span className={`text-sm font-bold ${
-                            searchResult.demand_status === 'High & Growing' ? 'text-emerald-600' :
-                            searchResult.demand_status === 'Declining' ? 'text-red-600' : 'text-amber-600'
-                          }`}>
+                          <span className={`text-sm font-bold ${searchResult.demand_status === 'High & Growing' ? 'text-emerald-600' :
+                              searchResult.demand_status === 'Declining' ? 'text-red-600' : 'text-amber-600'
+                            }`}>
                             {searchResult.demand_status}
                           </span>
                         </div>
@@ -762,9 +872,8 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                             <span className="text-[10px] font-semibold text-gray-400 uppercase">2029 Forecast</span>
                           </div>
                           <span className="text-xl font-extrabold text-gray-900">{searchResult.forecast_2029_index}</span>
-                          <span className={`text-[10px] ml-1 font-semibold ${
-                            searchResult.forecast_growth_percent > 0 ? 'text-emerald-600' : 'text-red-600'
-                          }`}>
+                          <span className={`text-[10px] ml-1 font-semibold ${searchResult.forecast_growth_percent > 0 ? 'text-emerald-600' : 'text-red-600'
+                            }`}>
                             ({searchResult.forecast_growth_percent > 0 ? '+' : ''}{searchResult.forecast_growth_percent}%)
                           </span>
                         </div>
@@ -791,52 +900,51 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           const barMaxH = 120 // max bar height in px
                           return (
                             <div className="overflow-x-auto -mx-1 px-1 pb-1">
-                            <div className="relative pl-8 min-w-[420px]">
-                              {/* Y-axis labels */}
-                              <div className="absolute left-0 top-0 flex flex-col justify-between text-[9px] text-gray-400 font-medium select-none" style={{ height: `${barMaxH}px` }}>
-                                <span>150</span>
-                                <span>100</span>
-                                <span>50</span>
-                                <span>0</span>
-                              </div>
-                              {/* Horizontal grid lines */}
-                              <div className="absolute left-8 right-0 top-0" style={{ height: `${barMaxH}px` }}>
-                                {[0, 1, 2, 3].map(i => (
-                                  <div key={i} className="absolute w-full border-t border-gray-100" style={{ top: `${(i / 3) * 100}%` }} />
-                                ))}
-                              </div>
-                              {/* Bars */}
-                              <div className="flex items-end justify-around border-b border-gray-200" style={{ height: `${barMaxH}px` }}>
-                                {searchResult.trend_timeline.map((point, i) => {
-                                  const barH = Math.max(4, (point.value / maxVal) * barMaxH)
-                                  return (
-                                    <div key={i} className="flex flex-col items-center group relative" style={{ flex: 1 }}>
-                                      {/* Value label */}
-                                      <div className="text-[9px] font-bold text-brand mb-1 select-none">{point.value}</div>
-                                      {/* Bar */}
-                                      <div
-                                        style={{ height: `${barH}px` }}
-                                        className={`w-4 sm:w-5 md:w-6 rounded-t transition-all duration-500 hover:scale-105 cursor-default ${
-                                          point.is_forecast
-                                            ? 'bg-gradient-to-t from-brand/30 to-brand/50 border border-dashed border-brand/50'
-                                            : 'bg-gradient-to-t from-brand to-brand-light'
-                                        }`}
-                                        title={`${point.year}: ${point.value}`}
-                                      />
+                              <div className="relative pl-8 min-w-[420px]">
+                                {/* Y-axis labels */}
+                                <div className="absolute left-0 top-0 flex flex-col justify-between text-[9px] text-gray-400 font-medium select-none" style={{ height: `${barMaxH}px` }}>
+                                  <span>150</span>
+                                  <span>100</span>
+                                  <span>50</span>
+                                  <span>0</span>
+                                </div>
+                                {/* Horizontal grid lines */}
+                                <div className="absolute left-8 right-0 top-0" style={{ height: `${barMaxH}px` }}>
+                                  {[0, 1, 2, 3].map(i => (
+                                    <div key={i} className="absolute w-full border-t border-gray-100" style={{ top: `${(i / 3) * 100}%` }} />
+                                  ))}
+                                </div>
+                                {/* Bars */}
+                                <div className="flex items-end justify-around border-b border-gray-200" style={{ height: `${barMaxH}px` }}>
+                                  {searchResult.trend_timeline.map((point, i) => {
+                                    const barH = Math.max(4, (point.value / maxVal) * barMaxH)
+                                    return (
+                                      <div key={i} className="flex flex-col items-center group relative" style={{ flex: 1 }}>
+                                        {/* Value label */}
+                                        <div className="text-[9px] font-bold text-brand mb-1 select-none">{point.value}</div>
+                                        {/* Bar */}
+                                        <div
+                                          style={{ height: `${barH}px` }}
+                                          className={`w-4 sm:w-5 md:w-6 rounded-t transition-all duration-500 hover:scale-105 cursor-default ${point.is_forecast
+                                              ? 'bg-gradient-to-t from-brand/30 to-brand/50 border border-dashed border-brand/50'
+                                              : 'bg-gradient-to-t from-brand to-brand-light'
+                                            }`}
+                                          title={`${point.year}: ${point.value}`}
+                                        />
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                {/* Year labels */}
+                                <div className="flex justify-around mt-1.5">
+                                  {searchResult.trend_timeline.map((point, i) => (
+                                    <div key={i} className="flex flex-col items-center" style={{ flex: 1 }}>
+                                      <span className={`text-[10px] font-bold ${point.is_forecast ? 'text-blue-600' : 'text-gray-700'}`}>{point.year}</span>
+                                      {point.is_forecast && <span className="text-[8px] text-blue-500 font-semibold uppercase leading-tight">Forecast</span>}
                                     </div>
-                                  )
-                                })}
+                                  ))}
+                                </div>
                               </div>
-                              {/* Year labels */}
-                              <div className="flex justify-around mt-1.5">
-                                {searchResult.trend_timeline.map((point, i) => (
-                                  <div key={i} className="flex flex-col items-center" style={{ flex: 1 }}>
-                                    <span className={`text-[10px] font-bold ${point.is_forecast ? 'text-blue-600' : 'text-gray-700'}`}>{point.year}</span>
-                                    {point.is_forecast && <span className="text-[8px] text-blue-500 font-semibold uppercase leading-tight">Forecast</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
                             </div>
                           )
                         })()}
@@ -911,11 +1019,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                   <button
                     type="button"
                     onClick={() => setDemandSubView('listings')}
-                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all min-w-0 ${
-                      demandSubView === 'listings'
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all min-w-0 ${demandSubView === 'listings'
                         ? 'bg-white text-brand shadow-sm'
                         : 'text-gray-500 hover:text-gray-800'
-                    }`}
+                      }`}
                   >
                     <Briefcase className="h-4 w-4 shrink-0" />
                     <span className="sm:hidden">Live Jobs</span>
@@ -924,11 +1031,10 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                   <button
                     type="button"
                     onClick={() => setDemandSubView('forecast')}
-                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all min-w-0 ${
-                      demandSubView === 'forecast'
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all min-w-0 ${demandSubView === 'forecast'
                         ? 'bg-white text-brand shadow-sm'
                         : 'text-gray-500 hover:text-gray-800'
-                    }`}
+                      }`}
                   >
                     <TrendingUp className="h-4 w-4 shrink-0" />
                     <span className="sm:hidden">Forecast</span>
@@ -959,306 +1065,304 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
               </div>
 
               {demandSubView === 'listings' && (
-              <>
-              {/* ── LIVE JOB LISTINGS FROM AGENTIC PIPELINE ── */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                {/* Section header */}
-                <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-brand/5 to-indigo-50/60 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-                  <div className="flex items-start sm:items-center space-x-3 min-w-0">
-                    <div className="p-2 bg-brand/10 rounded-lg shrink-0">
-                      <Briefcase className="h-4 w-4 text-brand" />
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="text-base font-bold text-gray-900 flex flex-wrap items-center gap-2">
-                        Live Job Listings
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-full animate-pulse">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                          Real-Time
-                        </span>
-                      </h2>
-                      <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                        Personalized for <span className="font-semibold text-brand">{user.target_role || 'your target role'}</span> — sourced from LinkedIn &amp; TopJobs via AI pipeline
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Controls row */}
-                  <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
-                    {/* Source filter */}
-                    <select
-                      value={liveJobsSource}
-                      onChange={(e) => { setLiveJobsSource(e.target.value); fetchLiveJobs(1, e.target.value) }}
-                      className="flex-1 sm:flex-none min-w-0 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:ring-2 focus:ring-brand/20 outline-none"
-                    >
-                      <option value="">All Sources</option>
-                      <option value="LinkedIn">LinkedIn</option>
-                      <option value="TopJobs">TopJobs</option>
-                    </select>
-
-                    {/* Refresh button */}
-                    <button
-                      onClick={() => fetchLiveJobs(1, liveJobsSource)}
-                      disabled={liveJobsLoading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand border border-brand/20 bg-brand/5 rounded-lg hover:bg-brand/10 transition-all disabled:opacity-50"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${liveJobsLoading ? 'animate-spin' : ''}`} />
-                      Refresh
-                    </button>
-
-                    {/* Pipeline trigger button */}
-                    <button
-                      onClick={triggerPipeline}
-                      disabled={pipelineTriggerLoading || pipelineStatus === 'triggered'}
-                      title="Run full 4-agent pipeline to collect & process fresh job data"
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                        pipelineStatus === 'triggered'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-brand text-white hover:bg-brand-dark shadow-sm'
-                      } disabled:opacity-60`}
-                    >
-                      <Zap className="h-3.5 w-3.5 shrink-0" />
-                      {pipelineStatus === 'triggered' ? 'Running…' : <><span className="sm:hidden">Pipeline</span><span className="hidden sm:inline">Run AI Pipeline</span></>}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Pipeline status banner */}
-                {pipelineStatus === 'triggered' && (
-                  <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3 text-xs text-blue-700">
-                    <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
-                    <div>
-                      <p className="font-bold">Autonomous Pipeline Running</p>
-                      <p className="text-blue-600 mt-0.5">Data Collection Agent → NLP Extraction Agent → Skill Processing Agent are operating in background. New listings will appear within ~30 seconds.</p>
-                    </div>
-                  </div>
-                )}
-                {pipelineStatus === 'error' && (
-                  <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-600">
-                    <AlertTriangle className="h-4 w-4 shrink-0" />
-                    Pipeline trigger failed. Please ensure the backend is running and try again.
-                  </div>
-                )}
-
-                {/* Body */}
-                <div className="p-4 sm:p-6">
-                  {liveJobsLoading && liveJobs.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 text-gray-400 space-y-3">
-                      <RefreshCw className="h-8 w-8 animate-spin text-brand/40" />
-                      <p className="text-sm font-medium">Fetching live job listings…</p>
-                    </div>
-                  ) : liveJobsError ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
-                      <div className="p-3 bg-amber-50 rounded-full">
-                        <AlertTriangle className="h-6 w-6 text-amber-500" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-700">No live listings yet</p>
-                        <p className="text-xs text-gray-400 mt-1">{liveJobsError}</p>
-                      </div>
-                      <button
-                        onClick={triggerPipeline}
-                        className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm"
-                      >
-                        <Zap className="h-4 w-4" />
-                        Start Data Collection Pipeline
-                      </button>
-                    </div>
-                  ) : liveJobs.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
-                      <div className="p-3 bg-gray-50 rounded-full">
-                        <Briefcase className="h-6 w-6 text-gray-300" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-700">
-                          {hasSearched && searchQuery.trim()
-                            ? `No listings match “${searchQuery.trim()}”`
-                            : 'No job listings collected yet'}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {hasSearched && searchQuery.trim()
-                            ? 'Try another job title or skill keyword, or clear search to return to recommended roles.'
-                            : 'Trigger the AI pipeline to collect live job posts from LinkedIn & TopJobs for your target role.'}
-                        </p>
-                      </div>
-                      {!(hasSearched && searchQuery.trim()) && (
-                      <button
-                        onClick={triggerPipeline}
-                        disabled={pipelineTriggerLoading}
-                        className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-60"
-                      >
-                        <Zap className="h-4 w-4" />
-                        {pipelineTriggerLoading ? 'Starting…' : 'Run AI Pipeline Now'}
-                      </button>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {/* Stats row */}
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
-                        <p className="text-xs text-gray-500 break-words">
-                          <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found for{' '}
-                          <span className="font-semibold text-brand">
-                            {hasSearched && searchQuery.trim() ? `"${searchQuery.trim()}"` : user.target_role}
-                          </span>
-                          {liveJobsSource && <span className="ml-1 text-gray-400">from {liveJobsSource}</span>}
-                        </p>
-                        <span className="text-[10px] text-gray-400 shrink-0">Ranked by skill match</span>
+                <>
+                  {/* ── LIVE JOB LISTINGS FROM AGENTIC PIPELINE ── */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    {/* Section header */}
+                    <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-brand/5 to-indigo-50/60 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                      <div className="flex items-start sm:items-center space-x-3 min-w-0">
+                        <div className="p-2 bg-brand/10 rounded-lg shrink-0">
+                          <Briefcase className="h-4 w-4 text-brand" />
+                        </div>
+                        <div className="min-w-0">
+                          <h2 className="text-base font-bold text-gray-900 flex flex-wrap items-center gap-2">
+                            Live Job Listings
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-full animate-pulse">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                              Real-Time
+                            </span>
+                          </h2>
+                          <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                            Personalized for <span className="font-semibold text-brand">{user.target_role || 'your target role'}</span> — sourced from LinkedIn &amp; TopJobs via AI pipeline
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Job cards */}
-                      <div className="space-y-3">
-                        {liveJobs.map((job, idx) => (
-                          <div
-                            key={job.job_id || idx}
-                            className="group relative flex flex-col sm:flex-row sm:items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-brand/25 hover:shadow-md bg-white transition-all duration-200"
+                      {/* Controls row */}
+                      <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
+                        {/* Source filter */}
+                        <select
+                          value={liveJobsSource}
+                          onChange={(e) => { setLiveJobsSource(e.target.value); fetchLiveJobs(1, e.target.value) }}
+                          className="flex-1 sm:flex-none min-w-0 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:ring-2 focus:ring-brand/20 outline-none"
+                        >
+                          <option value="">All Sources</option>
+                          <option value="LinkedIn">LinkedIn</option>
+                          <option value="TopJobs">TopJobs</option>
+                        </select>
+
+                        {/* Refresh button */}
+                        <button
+                          onClick={() => fetchLiveJobs(1, liveJobsSource)}
+                          disabled={liveJobsLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand border border-brand/20 bg-brand/5 rounded-lg hover:bg-brand/10 transition-all disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${liveJobsLoading ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </button>
+
+                        {/* Pipeline trigger button */}
+                        <button
+                          onClick={triggerPipeline}
+                          disabled={pipelineTriggerLoading || pipelineStatus === 'triggered'}
+                          title="Run full 4-agent pipeline to collect & process fresh job data"
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${pipelineStatus === 'triggered'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-brand text-white hover:bg-brand-dark shadow-sm'
+                            } disabled:opacity-60`}
+                        >
+                          <Zap className="h-3.5 w-3.5 shrink-0" />
+                          {pipelineStatus === 'triggered' ? 'Running…' : <><span className="sm:hidden">Pipeline</span><span className="hidden sm:inline">Run AI Pipeline</span></>}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Pipeline status banner */}
+                    {pipelineStatus === 'triggered' && (
+                      <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3 text-xs text-blue-700">
+                        <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
+                        <div>
+                          <p className="font-bold">Autonomous Pipeline Running</p>
+                          <p className="text-blue-600 mt-0.5">Data Collection Agent → NLP Extraction Agent → Skill Processing Agent are operating in background. New listings will appear within ~30 seconds.</p>
+                        </div>
+                      </div>
+                    )}
+                    {pipelineStatus === 'error' && (
+                      <div className="mx-4 sm:mx-6 mt-4 px-3 sm:px-4 py-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-xs text-red-600">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        Pipeline trigger failed. Please ensure the backend is running and try again.
+                      </div>
+                    )}
+
+                    {/* Body */}
+                    <div className="p-4 sm:p-6">
+                      {liveJobsLoading && liveJobs.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-16 text-gray-400 space-y-3">
+                          <RefreshCw className="h-8 w-8 animate-spin text-brand/40" />
+                          <p className="text-sm font-medium">Fetching live job listings…</p>
+                        </div>
+                      ) : liveJobsError ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                          <div className="p-3 bg-amber-50 rounded-full">
+                            <AlertTriangle className="h-6 w-6 text-amber-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-700">No live listings yet</p>
+                            <p className="text-xs text-gray-400 mt-1">{liveJobsError}</p>
+                          </div>
+                          <button
+                            onClick={triggerPipeline}
+                            className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm"
                           >
-                            {/* Skill match badge */}
-                            {job.skill_match_count > 0 && (
-                              <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">
-                                <CheckCircle2 className="h-3 w-3" />
-                                <span className="hidden sm:inline">{job.skill_match_count} skills matched</span>
-                                <span className="sm:hidden">{job.skill_match_count}</span>
-                              </div>
-                            )}
+                            <Zap className="h-4 w-4" />
+                            Start Data Collection Pipeline
+                          </button>
+                        </div>
+                      ) : liveJobs.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
+                          <div className="p-3 bg-gray-50 rounded-full">
+                            <Briefcase className="h-6 w-6 text-gray-300" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-700">
+                              {hasSearched && searchQuery.trim()
+                                ? `No listings match “${searchQuery.trim()}”`
+                                : 'No job listings collected yet'}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {hasSearched && searchQuery.trim()
+                                ? 'Try another job title or skill keyword, or clear search to return to recommended roles.'
+                                : 'Trigger the AI pipeline to collect live job posts from LinkedIn & TopJobs for your target role.'}
+                            </p>
+                          </div>
+                          {!(hasSearched && searchQuery.trim()) && (
+                            <button
+                              onClick={triggerPipeline}
+                              disabled={pipelineTriggerLoading}
+                              className="flex items-center gap-2 px-4 py-2 bg-brand text-white text-sm font-semibold rounded-lg hover:bg-brand-dark transition-all shadow-sm disabled:opacity-60"
+                            >
+                              <Zap className="h-4 w-4" />
+                              {pipelineTriggerLoading ? 'Starting…' : 'Run AI Pipeline Now'}
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          {/* Stats row */}
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
+                            <p className="text-xs text-gray-500 break-words">
+                              <span className="font-bold text-gray-800">{liveJobsTotal}</span> matching positions found for{' '}
+                              <span className="font-semibold text-brand">
+                                {hasSearched && searchQuery.trim() ? `"${searchQuery.trim()}"` : user.target_role}
+                              </span>
+                              {liveJobsSource && <span className="ml-1 text-gray-400">from {liveJobsSource}</span>}
+                            </p>
+                            <span className="text-[10px] text-gray-400 shrink-0">Ranked by skill match</span>
+                          </div>
 
-                            {/* Company initials avatar */}
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand/20 to-indigo-100 flex items-center justify-center text-sm font-extrabold text-brand shrink-0">
-                              {(job.company || 'Co').charAt(0).toUpperCase()}
-                            </div>
+                          {/* Job cards */}
+                          <div className="space-y-3">
+                            {liveJobs.map((job, idx) => (
+                              <div
+                                key={job.job_id || idx}
+                                className="group relative flex flex-col sm:flex-row sm:items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-brand/25 hover:shadow-md bg-white transition-all duration-200"
+                              >
+                                {/* Skill match badge */}
+                                {job.skill_match_count > 0 && (
+                                  <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    <span className="hidden sm:inline">{job.skill_match_count} skills matched</span>
+                                    <span className="sm:hidden">{job.skill_match_count}</span>
+                                  </div>
+                                )}
 
-                            {/* Content */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2 pr-12 sm:pr-28">
-                                <div className="min-w-0">
-                                  <h4 className="text-sm font-bold text-gray-900 group-hover:text-brand transition-colors leading-tight break-words">
-                                    {job.title}
-                                  </h4>
-                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
-                                    <span className="font-medium text-gray-700">{job.company}</span>
-                                    <span className="flex items-center gap-0.5">
-                                      <MapPin className="h-3 w-3 shrink-0" />
-                                      {job.location}
-                                    </span>
-                                    {job.seniority_level && (
-                                      <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-semibold">
-                                        {job.seniority_level}
+                                {/* Company initials avatar */}
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand/20 to-indigo-100 flex items-center justify-center text-sm font-extrabold text-brand shrink-0">
+                                  {(job.company || 'Co').charAt(0).toUpperCase()}
+                                </div>
+
+                                {/* Content */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-2 pr-12 sm:pr-28">
+                                    <div className="min-w-0">
+                                      <h4 className="text-sm font-bold text-gray-900 group-hover:text-brand transition-colors leading-tight break-words">
+                                        {job.title}
+                                      </h4>
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                                        <span className="font-medium text-gray-700">{job.company}</span>
+                                        <span className="flex items-center gap-0.5">
+                                          <MapPin className="h-3 w-3 shrink-0" />
+                                          {job.location}
+                                        </span>
+                                        {job.seniority_level && (
+                                          <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-semibold">
+                                            {job.seniority_level}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Description snippet */}
+                                  {job.description_snippet && (
+                                    <p className="mt-2 text-xs text-gray-500 leading-relaxed line-clamp-2">
+                                      {job.description_snippet}
+                                    </p>
+                                  )}
+
+                                  {/* Skill overlap badges */}
+                                  {job.skill_overlap && job.skill_overlap.length > 0 && (
+                                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                      {job.skill_overlap.slice(0, 6).map((sk, si) => (
+                                        <span key={si} className="px-2 py-0.5 bg-brand/8 text-brand text-[10px] font-semibold rounded-full border border-brand/15">
+                                          ✓ {sk}
+                                        </span>
+                                      ))}
+                                      {job.skill_overlap.length > 6 && (
+                                        <span className="text-[10px] text-gray-400">+{job.skill_overlap.length - 6} more</span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Footer row */}
+                                  <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
+                                    <div className="flex items-center gap-2">
+                                      {/* Source badge */}
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${job.source === 'LinkedIn'
+                                          ? 'bg-blue-100 text-blue-700'
+                                          : 'bg-orange-100 text-orange-700'
+                                        }`}>
+                                        {job.source}
                                       </span>
-                                    )}
+                                      {job.posted_date_text && (
+                                        <span className="text-[10px] text-gray-400">{job.posted_date_text}</span>
+                                      )}
+                                    </div>
+                                    <a
+                                      href={job.job_link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-1 text-xs font-semibold text-brand hover:text-brand-dark transition-colors"
+                                    >
+                                      View Job <ExternalLink className="h-3 w-3" />
+                                    </a>
                                   </div>
                                 </div>
                               </div>
-
-                              {/* Description snippet */}
-                              {job.description_snippet && (
-                                <p className="mt-2 text-xs text-gray-500 leading-relaxed line-clamp-2">
-                                  {job.description_snippet}
-                                </p>
-                              )}
-
-                              {/* Skill overlap badges */}
-                              {job.skill_overlap && job.skill_overlap.length > 0 && (
-                                <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                  {job.skill_overlap.slice(0, 6).map((sk, si) => (
-                                    <span key={si} className="px-2 py-0.5 bg-brand/8 text-brand text-[10px] font-semibold rounded-full border border-brand/15">
-                                      ✓ {sk}
-                                    </span>
-                                  ))}
-                                  {job.skill_overlap.length > 6 && (
-                                    <span className="text-[10px] text-gray-400">+{job.skill_overlap.length - 6} more</span>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Footer row */}
-                              <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-                                <div className="flex items-center gap-2">
-                                  {/* Source badge */}
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                    job.source === 'LinkedIn'
-                                      ? 'bg-blue-100 text-blue-700'
-                                      : 'bg-orange-100 text-orange-700'
-                                  }`}>
-                                    {job.source}
-                                  </span>
-                                  {job.posted_date_text && (
-                                    <span className="text-[10px] text-gray-400">{job.posted_date_text}</span>
-                                  )}
-                                </div>
-                                <a
-                                  href={job.job_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 text-xs font-semibold text-brand hover:text-brand-dark transition-colors"
-                                >
-                                  View Job <ExternalLink className="h-3 w-3" />
-                                </a>
-                              </div>
-                            </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
 
-                      {/* Pagination */}
-                      {liveJobsTotal > 15 && (
-                        <div className="mt-5 flex items-center justify-center gap-2 sm:gap-3 flex-wrap">
-                          <button
-                            onClick={() => fetchLiveJobs(liveJobsPage - 1, liveJobsSource)}
-                            disabled={liveJobsPage <= 1 || liveJobsLoading}
-                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-all"
-                          >
-                            ← Previous
-                          </button>
-                          <span className="text-xs text-gray-500">
-                            Page {liveJobsPage} · {Math.ceil(liveJobsTotal / 15)} total
-                          </span>
-                          <button
-                            onClick={() => fetchLiveJobs(liveJobsPage + 1, liveJobsSource)}
-                            disabled={liveJobsPage * 15 >= liveJobsTotal || liveJobsLoading}
-                            className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-all"
-                          >
-                            Next →
-                          </button>
-                        </div>
+                          {/* Pagination */}
+                          {liveJobsTotal > 15 && (
+                            <div className="mt-5 flex items-center justify-center gap-2 sm:gap-3 flex-wrap">
+                              <button
+                                onClick={() => fetchLiveJobs(liveJobsPage - 1, liveJobsSource)}
+                                disabled={liveJobsPage <= 1 || liveJobsLoading}
+                                className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-all"
+                              >
+                                ← Previous
+                              </button>
+                              <span className="text-xs text-gray-500">
+                                Page {liveJobsPage} · {Math.ceil(liveJobsTotal / 15)} total
+                              </span>
+                              <button
+                                onClick={() => fetchLiveJobs(liveJobsPage + 1, liveJobsSource)}
+                                disabled={liveJobsPage * 15 >= liveJobsTotal || liveJobsLoading}
+                                className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-all"
+                              >
+                                Next →
+                              </button>
+                            </div>
+                          )}
+                        </>
                       )}
-                    </>
-                  )}
-                </div>
-              </div>
-              </>
+                    </div>
+                  </div>
+                </>
               )}
 
               {demandSubView === 'forecast' && (
-              <>
-              <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 sm:mb-6">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-bold text-gray-900">Future Job Market Demand Forecasting</h2>
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Predictions on tech demand index calculated from LinkedIn, Indeed, and TopJobs.lk</p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 text-xs w-full sm:w-auto">
-                    <span className="text-gray-500 font-medium shrink-0">Forecast Horizon</span>
-                    <select
-                      value={forecastHorizon}
-                      onChange={(e) => setForecastHorizon(e.target.value)}
-                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-brand/20 outline-none"
-                    >
-                      <option value="2027">1-Year Outlook (2027)</option>
-                      <option value="2028">2-Year Outlook (2028)</option>
-                      <option value="2029">3-Year Outlook (2029)</option>
-                    </select>
-                  </div>
-                </div>
+                <>
+                  <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 sm:mb-6">
+                      <div className="min-w-0">
+                        <h2 className="text-base font-bold text-gray-900">Future Job Market Demand Forecasting</h2>
+                        <p className="text-xs text-gray-500 mt-1 leading-relaxed">Predictions on tech demand index calculated from LinkedIn, Indeed, and TopJobs.lk</p>
+                      </div>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 text-xs w-full sm:w-auto">
+                        <span className="text-gray-500 font-medium shrink-0">Forecast Horizon</span>
+                        <select
+                          value={forecastHorizon}
+                          onChange={(e) => setForecastHorizon(e.target.value)}
+                          className="w-full sm:w-auto border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-brand/20 outline-none"
+                        >
+                          <option value="2027">1-Year Outlook (2027)</option>
+                          <option value="2028">2-Year Outlook (2028)</option>
+                          <option value="2029">3-Year Outlook (2029)</option>
+                        </select>
+                      </div>
+                    </div>
 
-              </div>
-              <DemandInsightsPanel
-                insights={demandInsights}
-                isLoading={demandInsightsLoading}
-                error={demandInsightsError}
-                onRetry={fetchDemandForecast}
-                onCollect={triggerPipeline}
-                canCollect={Boolean(user.target_role)}
-              />
-              </>
+                  </div>
+                  <DemandInsightsPanel
+                    insights={demandInsights}
+                    isLoading={demandInsightsLoading}
+                    error={demandInsightsError}
+                    onRetry={fetchDemandForecast}
+                    onCollect={triggerPipeline}
+                    canCollect={Boolean(user.target_role)}
+                  />
+                </>
               )}
 
             </div>
@@ -1272,7 +1376,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                 <p className="text-xs text-gray-500 mt-1 mb-5">
                   Search for a specific job title or role to dynamically analyze your current skills against its requirements.
                 </p>
-                <form 
+                <form
                   onSubmit={(e) => { e.preventDefault(); fetchGapAnalysis(gapSearchQuery || user.target_role); }}
                   className="flex items-center gap-3"
                 >
@@ -1335,7 +1439,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         Skill Fit Diagnostics for target role: <span className="text-brand">{gapData.target_role}</span>
                       </h2>
                       <p className="text-xs text-gray-500 mt-1">Based on comparison of your CV/profile skills vs aggregate requirements scraped from TopJobs, Indeed, and LinkedIn.</p>
-                      
+
                       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="bg-emerald-50/50 border border-emerald-100 rounded-lg p-3">
                           <span className="text-[11px] font-bold text-emerald-800 uppercase block mb-2">✔️ Matching Skills ({gapData.matching_skills.length})</span>
@@ -1370,7 +1474,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         <span>Skill Relationship Knowledge Graph</span>
                       </h3>
                       <p className="text-xs text-gray-500 mb-4">Visual mapping of your CV skills and aliases compared to the target role requirements.</p>
-                      
+
                       <div ref={graphContainerRef} className="w-full h-[400px] rounded-lg border border-gray-100 bg-gray-50 overflow-hidden relative flex items-center justify-center">
                         <ForceGraph2D
                           width={graphWidth}
@@ -1380,7 +1484,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                           nodeLabel="name"
                           nodeCanvasObject={(node, ctx, globalScale) => {
                             const label = node.name;
-                            const fontSize = 12/globalScale;
+                            const fontSize = 12 / globalScale;
                             ctx.font = `${fontSize}px Sans-Serif`;
                             const textWidth = ctx.measureText(label).width;
                             const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.2);
@@ -1390,17 +1494,17 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
                             ctx.textAlign = 'center';
                             ctx.textBaseline = 'middle';
-                            
+
                             if (node.group === 'candidate' || node.group === 'target') {
-                                ctx.fillStyle = '#002855'; // brand
+                              ctx.fillStyle = '#002855'; // brand
                             } else if (node.group === 'matched_skill') {
-                                ctx.fillStyle = '#059669'; // emerald
+                              ctx.fillStyle = '#059669'; // emerald
                             } else if (node.group === 'missing_skill') {
-                                ctx.fillStyle = '#dc2626'; // red
+                              ctx.fillStyle = '#dc2626'; // red
                             } else {
-                                ctx.fillStyle = '#2563eb'; // blue
+                              ctx.fillStyle = '#2563eb'; // blue
                             }
-                            
+
                             ctx.fillText(label, node.x, node.y);
                             node.__bckgDimensions = bckgDimensions;
                           }}
@@ -1425,12 +1529,12 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         <span>Recommended Skill Acquisition Roadmap</span>
                       </h3>
                       <p className="text-xs text-gray-500 mb-5">Suggested step-by-step learning path to acquire your missing skills effectively, starting from base foundations.</p>
-                      
+
                       <div className="space-y-6 relative border-l-2 border-brand/20 ml-2 pl-6 pt-2 pb-2">
                         {gapData.skill_roadmap.map((phase, idx) => (
                           <div key={idx} className="relative">
                             <div className="absolute -left-[33px] top-0.5 rounded-full bg-white border-2 border-brand h-4 w-4 shadow-[0_0_0_2px_white] flex items-center justify-center">
-                                <div className="bg-brand h-1.5 w-1.5 rounded-full"></div>
+                              <div className="bg-brand h-1.5 w-1.5 rounded-full"></div>
                             </div>
                             <h4 className="text-xs font-bold text-gray-900">{phase.title}</h4>
                             <div className="flex flex-wrap gap-2 mt-2">
@@ -1475,26 +1579,24 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         {careerData.roadmap.map((step, idx) => (
                           <div key={idx} className="relative">
                             {/* Circle dot */}
-                            <div className={`absolute -left-[37px] top-0.5 rounded-full border-4 border-white h-6 w-6 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ${
-                              step.status === 'completed'
+                            <div className={`absolute -left-[37px] top-0.5 rounded-full border-4 border-white h-6 w-6 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ${step.status === 'completed'
                                 ? 'bg-emerald-500'
                                 : step.status === 'in-progress'
-                                ? 'bg-indigo-600'
-                                : 'bg-gray-300'
-                            }`}>
+                                  ? 'bg-indigo-600'
+                                  : 'bg-gray-300'
+                              }`}>
                               {step.step}
                             </div>
 
                             <div>
                               <div className="flex items-center flex-wrap gap-2">
                                 <h3 className="text-[11px] font-bold text-gray-900 leading-tight">{step.title}</h3>
-                                <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase ${
-                                  step.status === 'completed'
+                                <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold border uppercase ${step.status === 'completed'
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : step.status === 'in-progress'
-                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                    : 'bg-gray-100 text-gray-400 border-gray-200'
-                                }`}>
+                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                      : 'bg-gray-100 text-gray-400 border-gray-200'
+                                  }`}>
                                   {step.status}
                                 </span>
                               </div>
@@ -1606,9 +1708,9 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                                 const pct = Math.round((item.avg_boost_lkr / maxBoost) * 100);
                                 const categoryColor = {
                                   'cutting-edge': 'from-purple-500 to-indigo-500',
-                                  'advanced':     'from-indigo-500 to-blue-500',
-                                  'cloud':        'from-sky-500 to-cyan-500',
-                                  'devops':       'from-teal-500 to-emerald-500',
+                                  'advanced': 'from-indigo-500 to-blue-500',
+                                  'cloud': 'from-sky-500 to-cyan-500',
+                                  'devops': 'from-teal-500 to-emerald-500',
                                   'foundational': 'from-gray-400 to-gray-500',
                                 }[item.category] || 'from-brand to-indigo-500';
                                 return (
@@ -1616,13 +1718,12 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                                     <div className="flex justify-between items-center mb-0.5">
                                       <div className="flex items-center space-x-1.5">
                                         <span className="text-xs font-semibold text-gray-800">{item.skill}</span>
-                                        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold border ${
-                                          item.category === 'cutting-edge' ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                          : item.category === 'advanced'   ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                          : item.category === 'cloud'      ? 'bg-sky-50 text-sky-700 border-sky-200'
-                                          : item.category === 'devops'     ? 'bg-teal-50 text-teal-700 border-teal-200'
-                                          : 'bg-gray-100 text-gray-600 border-gray-200'
-                                        }`}>{item.category}</span>
+                                        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold border ${item.category === 'cutting-edge' ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                            : item.category === 'advanced' ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                              : item.category === 'cloud' ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                                : item.category === 'devops' ? 'bg-teal-50 text-teal-700 border-teal-200'
+                                                  : 'bg-gray-100 text-gray-600 border-gray-200'
+                                          }`}>{item.category}</span>
                                       </div>
                                       <span className="text-[10px] font-bold text-emerald-600">+LKR {(item.avg_boost_lkr / 1000).toFixed(0)}K/mo</span>
                                     </div>
@@ -1714,22 +1815,20 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       <button
                         type="button"
                         onClick={() => { setCourseSearchScope('recommended'); setCourseSearchQuery(''); }}
-                        className={`px-3 py-1.5 rounded-md transition-all ${
-                          courseSearchScope === 'recommended'
+                        className={`px-3 py-1.5 rounded-md transition-all ${courseSearchScope === 'recommended'
                             ? 'bg-white text-gray-900 shadow-sm'
                             : 'text-gray-500 hover:text-gray-900'
-                        }`}
+                          }`}
                       >
                         Recommended
                       </button>
                       <button
                         type="button"
                         onClick={() => { setCourseSearchScope('all'); setCourseSearchQuery(''); }}
-                        className={`px-3 py-1.5 rounded-md transition-all ${
-                          courseSearchScope === 'all'
+                        className={`px-3 py-1.5 rounded-md transition-all ${courseSearchScope === 'all'
                             ? 'bg-white text-gray-900 shadow-sm'
                             : 'text-gray-500 hover:text-gray-900'
-                        }`}
+                          }`}
                       >
                         All Catalog
                       </button>
@@ -1771,14 +1870,14 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     ) : (() => {
                       const displayedCourses = courseSearchScope === 'recommended'
                         ? (gapData.recommended_courses || []).filter(course => {
-                            if (!courseSearchQuery) return true;
-                            const q = courseSearchQuery.toLowerCase();
-                            return (
-                              course.title.toLowerCase().includes(q) ||
-                              course.provider.toLowerCase().includes(q) ||
-                              course.skills_taught.some(s => s.toLowerCase().includes(q))
-                            );
-                          })
+                          if (!courseSearchQuery) return true;
+                          const q = courseSearchQuery.toLowerCase();
+                          return (
+                            course.title.toLowerCase().includes(q) ||
+                            course.provider.toLowerCase().includes(q) ||
+                            course.skills_taught.some(s => s.toLowerCase().includes(q))
+                          );
+                        })
                         : allCourses;
 
                       if (displayedCourses.length === 0) {
@@ -1842,7 +1941,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     <p className="mt-2 max-w-xl text-sm leading-relaxed text-blue-100">We compare your profile with collected job postings and surface the skills that give you the strongest starting point.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:min-w-[250px]">
-                    <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm"><p className="text-[10px] font-semibold uppercase text-blue-200">Roles found</p><p className="mt-1 text-2xl font-black">{matchingTotal}</p></div>
+                    <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm"><p className="text-[10px] font-semibold uppercase text-blue-200">Indexed jobs</p><p className="mt-1 text-2xl font-black">{matchingTotal}</p></div>
                     <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm"><p className="text-[10px] font-semibold uppercase text-blue-200">Your skills</p><p className="mt-1 text-2xl font-black">{Array.isArray(user.skills) ? user.skills.length : 0}</p></div>
                   </div>
                 </div>
@@ -1857,18 +1956,25 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     {(jobSearchQuery || matchingSource) && <button type="button" onClick={() => { setJobSearchQuery(''); setMatchingSource(''); fetchMatchingJobs('', 1, '') }} className="rounded-lg border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 transition-all hover:bg-gray-50 hover:text-gray-700">Reset</button>}
                   </div>
                 </form>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-400"><Target className="h-3.5 w-3.5 text-brand" /><span>Matching against</span><span className="rounded-full bg-brand/5 px-2 py-0.5 font-semibold text-brand">{user.target_role || 'your target role'}</span><span className="hidden text-gray-300 sm:inline">|</span><span>Ranked by shared skills</span></div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-400"><Target className="h-3.5 w-3.5 text-brand" /><span>Matching against</span><span className="rounded-full bg-brand/5 px-2 py-0.5 font-semibold text-brand">{user.target_role || 'your target role'}</span><span className="hidden text-gray-300 sm:inline">|</span><span>Ranked by AI relevance score</span></div>
               </div>
 
               {matchingError && <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" /><div className="flex-1"><p className="font-bold">Matching service unavailable</p><p className="mt-0.5">{matchingError}</p></div><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage, matchingSource)} className="font-bold text-amber-900 underline">Retry</button></div>}
 
-              {isSearchingJobs && matchedJobs.length === 0 ? (
+              {matchingWarmingUp ? (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-blue-100 bg-blue-50 py-16 text-center shadow-sm">
+                  <RefreshCw className="h-8 w-8 animate-spin text-brand/60" />
+                  <p className="mt-3 text-sm font-semibold text-gray-700">Getting the matching engine ready…</p>
+                  <p className="mt-1 text-xs text-gray-400">The semantic model is loading at startup — this takes about 20–30 seconds.</p>
+                  <p className="mt-2 text-xs text-blue-500 font-medium">Retrying automatically in 15 seconds…</p>
+                </div>
+              ) : isSearchingJobs && matchedJobs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-16 text-center shadow-sm"><RefreshCw className="h-8 w-8 animate-spin text-brand/50" /><p className="mt-3 text-sm font-semibold text-gray-700">Calculating your best matches...</p><p className="mt-1 text-xs text-gray-400">Searching the latest collected job postings.</p></div>
               ) : matchedJobs.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm"><Briefcase className="mx-auto h-9 w-9 text-gray-300" /><p className="mt-3 text-sm font-bold text-gray-700">No matching roles yet</p><p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-gray-400">Try a broader search, update your skills in My Profile, or run the job collection pipeline from Market Forecasts.</p></div>
               ) : (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between px-1 text-xs text-gray-500"><span><strong className="text-gray-800">{matchingTotal}</strong> roles matched to your profile</span><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage, matchingSource)} disabled={isSearchingJobs} className="flex items-center gap-1 font-semibold text-brand hover:text-brand-dark disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${isSearchingJobs ? 'animate-spin' : ''}`} /> Refresh</button></div>
+                  <div className="flex items-center justify-between px-1 text-xs text-gray-500"><span><strong className="text-gray-800">{matchingTotal}</strong> jobs ranked by relevance to your profile</span><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage, matchingSource)} disabled={isSearchingJobs} className="flex items-center gap-1 font-semibold text-brand hover:text-brand-dark disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${isSearchingJobs ? 'animate-spin' : ''}`} /> Refresh</button></div>
                   {matchedJobs.map((job) => {
                     const skills = Array.isArray(user.skills) ? user.skills : []
                     const matchScore = skills.length ? Math.min(100, Math.round((job.skill_match_count / skills.length) * 100)) : 0
@@ -1876,13 +1982,13 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     return (
                       <article key={job.id || job.job_id} className="group rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-brand/30 hover:shadow-md sm:p-5">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-                          <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div></div></div>
+                          <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div>{job.llm_reasoning && <div className="mt-3 rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-[11px] text-cyan-950"><p className="font-bold">AI alignment reasoning: {String(job.llm_reasoning.recommendation || 'review')}</p>{job.llm_reasoning.fit_summary && <p className="mt-1 leading-relaxed">{job.llm_reasoning.fit_summary}</p>}{Array.isArray(job.llm_reasoning.skill_gaps) && job.llm_reasoning.skill_gaps.length > 0 && <p className="mt-1"><span className="font-semibold">Skill gaps:</span> {job.llm_reasoning.skill_gaps.join(', ')}</p>}</div>}</div></div>
                           <div className="flex shrink-0 items-center justify-between gap-4 border-t border-gray-100 pt-3 lg:w-32 lg:flex-col lg:items-center lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0"><div className="text-center"><p className={`text-2xl font-black ${matchScore >= 70 ? 'text-emerald-600' : matchScore >= 40 ? 'text-amber-600' : 'text-gray-500'}`}>{matchScore}%</p><p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Skill fit</p><p className="mt-1 text-[10px] text-gray-400">{job.skill_match_count} shared skill{job.skill_match_count === 1 ? '' : 's'}</p></div>{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-dark">View role <ExternalLink className="h-3 w-3" /></a> : <span className="text-[10px] text-gray-400">Link unavailable</span>}</div>
                         </div>
                       </article>
                     )
                   })}
-                  {matchingTotal > 12 && <div className="flex items-center justify-center gap-3 pt-2"><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage - 1, matchingSource)} disabled={matchingPage <= 1 || isSearchingJobs} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="text-xs text-gray-500">Page {matchingPage} of {Math.ceil(matchingTotal / 12)}</span><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage + 1, matchingSource)} disabled={matchingPage * 12 >= matchingTotal || isSearchingJobs} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div>}
+                  {matchingTotalPages > 1 && <div className="flex items-center justify-center gap-3 pt-2"><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage - 1, matchingSource)} disabled={matchingPage <= 1 || isSearchingJobs} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="text-xs text-gray-500">Page {matchingPage} of {matchingTotalPages}</span><button type="button" onClick={() => fetchMatchingJobs(jobSearchQuery, matchingPage + 1, matchingSource)} disabled={matchingPage >= matchingTotalPages || isSearchingJobs} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div>}
                 </div>
               )}
             </div>
@@ -1933,6 +2039,27 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       {cvSuccessMsg && (
                         <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded text-center">
                           {cvSuccessMsg}
+                        </div>
+                      )}
+                      {cvErrorMsg && (
+                        <div className="p-3 bg-red-50 border border-red-200 text-red-800 text-xs rounded text-center">
+                          {cvErrorMsg}
+                        </div>
+                      )}
+                      {savedCv && (
+                        <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-semibold truncate">Saved CV: {savedCv.filename}</span>
+                            <div className="flex shrink-0 gap-3">
+                              <button type="button" onClick={handleDownloadCv} className="font-semibold underline hover:no-underline">
+                                Download
+                              </button>
+                              <button type="button" onClick={handleRemoveCv} className="font-semibold underline hover:no-underline">
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                          <p className="mt-1">Your parsed CV details are stored securely and available across devices.</p>
                         </div>
                       )}
                       <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 hover:border-brand/40 transition-colors bg-gray-50/50">

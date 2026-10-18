@@ -54,6 +54,36 @@ function App() {
     }
   })
 
+  // ── Validate persisted token on every page load ───────────────────────────
+  // If the stored JWT has expired the backend returns 401.  In that case we
+  // clear localStorage and send the user back to the login page so they never
+  // see a dashboard full of 401 errors.
+  useEffect(() => {
+    const token = localStorage.getItem('emploeralk_token')
+    const savedUser = localStorage.getItem('emploeralk_user')
+    // Only run the check when we have both a token and a user in storage
+    // (i.e. the page was reloaded with an existing session).
+    if (!token || !savedUser) return
+
+    fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (res.status === 401 || res.status === 403) {
+          // Token is expired or revoked — clear everything and go to login
+          localStorage.removeItem('emploeralk_token')
+          localStorage.removeItem('emploeralk_user')
+          setUser(null)
+          setCurrentView('login')
+        }
+        // 200 → session is still valid; no action needed
+      })
+      .catch(() => {
+        // Network error (backend down etc.) — leave the user on the dashboard;
+        // individual API calls will show their own error states.
+      })
+  }, []) // run once on mount
+
   // ── Google OAuth callback handler ──────────────────────────────────────────
   useEffect(() => {
     const hash = window.location.hash
