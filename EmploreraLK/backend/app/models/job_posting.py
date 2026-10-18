@@ -54,6 +54,38 @@ class JobPosting(Base):
         """Serialize metadata dictionary to JSON."""
         self.raw_metadata = json.dumps(data)
 
+    @property
+    def source_platforms(self) -> list:
+        """Return distinct source portals represented by this canonical posting."""
+        metadata_sources = self.get_metadata().get("source_platforms", [])
+        if not isinstance(metadata_sources, list):
+            metadata_sources = []
+        return list(dict.fromkeys(
+            [str(source) for source in metadata_sources if source]
+            + ([self.source] if self.source else [])
+        ))
+
+    @property
+    def source_jobs(self) -> list:
+        """Return the source-specific links merged into this posting."""
+        references = self.get_metadata().get("source_jobs", [])
+        if isinstance(references, list):
+            references = [
+                reference for reference in references
+                if isinstance(reference, dict)
+                and reference.get("source")
+                and reference.get("job_link")
+            ]
+        else:
+            references = []
+        if references:
+            return references
+        return [{
+            "source": self.source,
+            "job_id": self.job_id,
+            "job_link": self.job_link,
+        }]
+
     def get_skills(self) -> list:
         """Get parsed list of extracted skills."""
         if not self.skills_extracted:
@@ -185,5 +217,4 @@ class SkillProcessingRun(Base):
 
     def set_summary(self, data: Dict[str, Any]) -> None:
         self.execution_summary = json.dumps(data)
-
 

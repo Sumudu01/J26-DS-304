@@ -21,7 +21,7 @@ logger = logging.getLogger("run_agent")
 
 def main():
     parser = argparse.ArgumentParser(
-        description="EmploreraLK Autonomous Multi-Platform (LinkedIn & TopJobs.lk) Job Data Collection Agent"
+        description="EmploreraLK Autonomous Multi-Platform (LinkedIn, TopJobs.lk & Rooster.jobs) Job Data Collection Agent"
     )
     parser.add_argument(
         "--keywords",
@@ -38,8 +38,8 @@ def main():
     parser.add_argument(
         "--sources",
         nargs="+",
-        default=["linkedin", "topjobs"],
-        help="Target portals: 'linkedin', 'topjobs', or both (default: linkedin topjobs)"
+        default=["linkedin", "topjobs", "rooster"],
+        help="Target portals: 'linkedin', 'topjobs', 'rooster', or 'all' (default: all)"
     )
     parser.add_argument(
         "--max-jobs",
@@ -97,13 +97,15 @@ def main():
     clean_sources = []
     for s in raw_sources:
         s_lower = s.lower()
-        if "top" in s_lower:
+        if s_lower == "all":
+            clean_sources = ["LinkedIn", "TopJobs", "Rooster.jobs"]
+            break
+        elif "rooster" in s_lower:
+            clean_sources.append("Rooster.jobs")
+        elif "top" in s_lower:
             clean_sources.append("TopJobs")
         elif "link" in s_lower:
             clean_sources.append("LinkedIn")
-        elif s_lower == "all":
-            clean_sources = ["LinkedIn", "TopJobs"]
-            break
         else:
             clean_sources.append(s)
 
@@ -138,6 +140,16 @@ def main():
         )
         agent = LinkedInDataCollectionAgent(db=db_session)
         report = agent.execute_goal(goal)
+        if db_session and report.collected_job_ids:
+            from app.components.forecasting.services.scraping_service import ScrapingService
+
+            report_data = ScrapingService.process_collected_jobs(db_session, report)
+            nlp_result = report_data.get("nlp_extraction", {})
+            print(
+                "Job descriptions and skills processed: "
+                f"{nlp_result.get('processed_count', 0)} "
+                f"({nlp_result.get('status', 'unknown')})"
+            )
 
         print("\n" + "=" * 65)
         print(" AUTONOMOUS MULTI-PLATFORM AGENT EXECUTION SUMMARY ".center(65, "="))

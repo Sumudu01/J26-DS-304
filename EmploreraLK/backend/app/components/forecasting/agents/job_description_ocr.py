@@ -32,13 +32,7 @@ def _load_ocr_dependencies():
 
 def extract_topjobs_image_text(image_urls: Iterable[str]) -> Optional[str]:
     """Download and OCR TopJobs advert images, returning readable English text."""
-    pytesseract, Image, ImageOps = _load_ocr_dependencies()
-    extracted_text = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; EmploreraLKJobDescriptionOCR/1.0)",
-        "Referer": "https://www.topjobs.lk/",
-    }
-
+    valid_image_urls = []
     for image_url in list(image_urls)[:8]:
         parsed_url = urlparse(image_url)
         host = parsed_url.hostname or ""
@@ -49,7 +43,19 @@ def extract_topjobs_image_text(image_urls: Iterable[str]) -> Optional[str]:
         ):
             logger.warning("Skipping invalid TopJobs advert image URL: %s", image_url)
             continue
+        valid_image_urls.append(image_url)
 
+    if not valid_image_urls:
+        return None
+
+    pytesseract, Image, ImageOps = _load_ocr_dependencies()
+    extracted_text = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; EmploreraLKJobDescriptionOCR/1.0)",
+        "Referer": "https://www.topjobs.lk/",
+    }
+
+    for image_url in valid_image_urls:
         try:
             response = requests.get(image_url, headers=headers, timeout=(5, 25))
             response.raise_for_status()

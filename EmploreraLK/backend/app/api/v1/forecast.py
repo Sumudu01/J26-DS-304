@@ -21,10 +21,11 @@ router = APIRouter(prefix="/forecast", tags=["Forecasting & Data Collection"])
     "/jobs/collect",
     response_model=AgentRunStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger Autonomous LinkedIn Data Collection Agent",
+    summary="Trigger Autonomous Job Data Collection Agent",
     description=(
         "Deploys the autonomous data collection agent to search, parse, "
-        "deduplicate, and persist job posts from LinkedIn based on specified keywords and location."
+        "deduplicate, and persist job posts from LinkedIn, TopJobs, and Rooster.jobs. After collection, "
+        "job descriptions and skills are extracted and saved; TopJobs advert images are OCRed."
     )
 )
 def trigger_data_collection(
@@ -84,7 +85,7 @@ def list_collected_jobs(
     keyword: Optional[str] = Query(None, description="Search keyword in title, tag, or description"),
     location: Optional[str] = Query(None, description="Filter by location"),
     company: Optional[str] = Query(None, description="Filter by company name"),
-    source: Optional[str] = Query(None, description="Filter by portal source: 'LinkedIn' or 'TopJobs'"),
+    source: Optional[str] = Query(None, description="Filter by portal source: 'LinkedIn', 'TopJobs', or 'Rooster.jobs'"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(25, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db)
@@ -346,14 +347,14 @@ def get_skill_co_occurrences(
     description=(
         "Returns real-time job postings from the database matched to the user's target role "
         "and skill profile. Jobs are scored by skill-overlap and sorted by relevance then recency. "
-        "Sourced from LinkedIn & TopJobs via the autonomous 4-agent pipeline."
+        "Sourced from LinkedIn, TopJobs, and Rooster.jobs via the autonomous pipeline."
     ),
 )
 def get_recommended_jobs(
     target_role: Optional[str] = Query(None, description="User's target job role (from profile)"),
     skills: Optional[str] = Query(None, description="Comma-separated user skills for overlap scoring"),
     keyword: Optional[str] = Query(None, description="Free-text job title or skill keyword"),
-    source: Optional[str] = Query(None, description="Filter by source platform: LinkedIn or TopJobs"),
+    source: Optional[str] = Query(None, description="Filter by source platform: LinkedIn, TopJobs, or Rooster.jobs"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=50, description="Results per page"),
     db: Session = Depends(get_db),

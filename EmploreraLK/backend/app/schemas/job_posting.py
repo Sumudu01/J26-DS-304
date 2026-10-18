@@ -1,6 +1,7 @@
+import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class JobPostingBase(BaseModel):
@@ -24,16 +25,32 @@ class JobPostingCreate(JobPostingBase):
 
 class JobPostingResponse(JobPostingBase):
     id: int
+    skills_extracted: List[str] = Field(default_factory=list)
+    source_platforms: List[str] = Field(default_factory=list)
+    source_jobs: List[Dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("skills_extracted", mode="before")
+    @classmethod
+    def parse_extracted_skills(cls, value: Any) -> List[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return [skill.strip() for skill in value.split(",") if skill.strip()]
+            return parsed if isinstance(parsed, list) else []
+        return value if isinstance(value, list) else []
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class AgentCollectionGoal(BaseModel):
     sources: List[str] = Field(
-        default=["LinkedIn", "TopJobs"],
-        description="Target job portals: ['LinkedIn', 'TopJobs']"
+        default=["LinkedIn", "TopJobs", "Rooster.jobs"],
+        description="Target job portals: ['LinkedIn', 'TopJobs', 'Rooster.jobs']"
     )
     keywords: str = Field(
         default="Information Technology",
@@ -85,7 +102,7 @@ class AgentCollectionGoal(BaseModel):
 
 class AgentRunStatus(BaseModel):
     run_id: str
-    source: str = "LinkedIn,TopJobs"
+    source: str = "LinkedIn,TopJobs,Rooster.jobs"
     status: str
     target_keywords: str
     target_location: str
