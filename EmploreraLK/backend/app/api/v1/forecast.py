@@ -151,6 +151,81 @@ def get_demand_insights(
     return ForecastingService.get_demand_insights(db=db, target_year=target_year)
 
 
+@router.get(
+    "/demand-forecast",
+    response_model=Dict[str, Any],
+    summary="Get the latest persisted multi-model job-market forecast",
+    description="Return model evaluations and monthly emerging/declining skill and role forecasts for up to 36 months.",
+)
+def get_demand_forecast(
+    horizon_months: int = Query(36, ge=1, le=36),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    result = ForecastingService.get_latest_forecast(
+        db,
+        horizon_months=horizon_months,
+    )
+    return result or {
+        "available": False,
+        "message": "No model forecast is stored yet. Start a forecast run to train the models.",
+    }
+
+
+@router.post(
+    "/demand-forecast/train",
+    response_model=Dict[str, Any],
+    summary="Train, evaluate, and persist demand forecasting models",
+    description="Evaluate ARIMA, Prophet, N-BEATS, and TFT on a temporal holdout, then select the best model per skill and role.",
+)
+def train_demand_forecast(
+    horizon_months: int = Query(36, ge=1, le=36),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    try:
+        ForecastingService.train_and_store(
+            db,
+            horizon_months=36,
+        )
+        result = ForecastingService.get_latest_forecast(
+            db,
+            horizon_months=horizon_months,
+        )
+        if result is None:
+            raise RuntimeError("Forecast training completed without a saved result")
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.error("No demand forecasting model could be trained: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Demand forecasting run failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Demand forecasting failed. See backend logs for details.",
+        ) from exc
+
+
+@router.get(
+    "/demand-forecast/history",
+    response_model=List[Dict[str, Any]],
+    summary="Browse stored forecast knowledge",
+    description="List previous persisted model evaluations and generated forecast insights.",
+)
+def get_demand_forecast_history(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    return ForecastingService.get_forecast_history(db, limit=limit)
+
+
 # ─── NLP Skill Extraction Agent Endpoints ────────────────────────────────────
 
 from app.schemas.nlp_extraction import (

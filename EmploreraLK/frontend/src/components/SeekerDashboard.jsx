@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
-import DemandInsightsPanel from './DemandInsightsPanel.jsx'
+import FutureDemandForecastPanel from './FutureDemandForecastPanel.jsx'
 import CandidateProfileCollection from './CandidateProfileCollection.jsx'
 import TargetRoleInput from './TargetRoleInput.jsx'
 import { createNotification, getAuthHeaders } from './notificationsApi.js'
@@ -33,10 +33,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   // API response states
   const [demandData] = useState([])
-  const [forecastHorizon, setForecastHorizon] = useState('2029') // 2027, 2028, 2029
-  const [demandInsights, setDemandInsights] = useState(null)
-  const [demandInsightsLoading, setDemandInsightsLoading] = useState(false)
-  const [demandInsightsError, setDemandInsightsError] = useState('')
 
   // Search demand state
   const [searchQuery, setSearchQuery] = useState('')
@@ -118,28 +114,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       fetchLiveJobs(1, '')
     }
   }, [activeTab, user.target_role, userSkillsKey])
-
-  const fetchDemandForecast = async () => {
-    setDemandInsightsLoading(true)
-    setDemandInsightsError('')
-    setDemandInsights(null)
-    try {
-      const res = await fetch(`${API_URL}/forecast/demand-insights?target_year=${forecastHorizon}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setDemandInsights(await res.json())
-    } catch (e) {
-      console.error('Error loading future demand insights', e)
-      setDemandInsightsError(e.message || 'Could not load demand insights.')
-    } finally {
-      setDemandInsightsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (activeTab === 'demand' && demandSubView === 'forecast') {
-      fetchDemandForecast()
-    }
-  }, [activeTab, demandSubView, forecastHorizon])
 
   const fetchGapAnalysis = async (targetRole = user.target_role) => {
     setIsSearchingGap(true)
@@ -1280,28 +1254,12 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 sm:mb-6">
                   <div className="min-w-0">
                     <h2 className="text-base font-bold text-gray-900">Future Job Market Demand Forecasting</h2>
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Predictions on tech demand index calculated from LinkedIn, Indeed, and TopJobs.lk</p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 text-xs w-full sm:w-auto">
-                    <span className="text-gray-500 font-medium shrink-0">Forecast Horizon</span>
-                    <select
-                      value={forecastHorizon}
-                      onChange={(e) => setForecastHorizon(e.target.value)}
-                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-brand/20 outline-none"
-                    >
-                      <option value="2027">1-Year Outlook (2027)</option>
-                      <option value="2028">2-Year Outlook (2028)</option>
-                      <option value="2029">3-Year Outlook (2029)</option>
-                    </select>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Model-validated monthly skill and job-role demand forecasts from the dataset and collected postings.</p>
                   </div>
                 </div>
 
               </div>
-              <DemandInsightsPanel
-                insights={demandInsights}
-                isLoading={demandInsightsLoading}
-                error={demandInsightsError}
-                onRetry={fetchDemandForecast}
+              <FutureDemandForecastPanel
                 onCollect={triggerPipeline}
                 canCollect={Boolean(user.target_role)}
               />

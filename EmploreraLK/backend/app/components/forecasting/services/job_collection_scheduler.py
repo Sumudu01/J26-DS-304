@@ -16,6 +16,7 @@ from app.components.forecasting.services.skill_processing_service import (
 from app.components.forecasting.agents.job_posting_time_series_agent import (
     JobPostingTimeSeriesAgent,
 )
+from app.components.forecasting.services.forecasting_service import ForecastingService
 
 logger = logging.getLogger("emploreralk.services.job_collection_scheduler")
 
@@ -132,6 +133,27 @@ class LiveJobCollectionScheduler:
                 days=730,
                 interval="month",
             )
+            try:
+                forecast = ForecastingService.train_and_store(
+                    db,
+                    horizon_months=36,
+                )
+                forecast_summary = {
+                    "status": "completed",
+                    "run_id": forecast["run_id"],
+                    "best_model": forecast["best_model"],
+                    "series_count": len(forecast["series"]),
+                }
+            except (RuntimeError, ValueError) as exc:
+                logger.warning(
+                    "Forecast refresh after collection %s was not completed: %s",
+                    run_id,
+                    exc,
+                )
+                forecast_summary = {
+                    "status": "unavailable",
+                    "error": str(exc),
+                }
             run = db.query(DataCollectionRun).filter_by(run_id=run_id).one()
             summary = result.execution_summary or {}
             summary["skill_processing"] = {
@@ -144,6 +166,7 @@ class LiveJobCollectionScheduler:
                 "interval": time_series["interval"],
                 "points": len(time_series["points"]),
             }
+            summary["demand_forecast"] = forecast_summary
             run.set_summary(summary)
             db.commit()
             logger.info(

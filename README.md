@@ -361,6 +361,38 @@ The **Skill Processing Agent** ([`skill_processing_agent.py`](file:///e:/Sliit/Y
 
 ---
 
+## Future Demand Forecasting
+
+The forecasting pipeline combines dated entries from
+`EmploreraLK/backend/app/components/forecasting/models/job_postings.csv` with
+the latest collected job postings. It builds monthly demand series for extracted
+skills and job titles, evaluates ARIMA, Prophet, N-BEATS, and TFT against a
+trailing temporal holdout, and compares MAPE, RMSE, and MAE before selecting the
+best available model for each series. Forecasts cover up to 36 months.
+
+Generated insights and model metrics are versioned in the `forecast_runs`
+database table. The full four-agent collection pipeline refreshes the forecast
+after NLP extraction and skill processing; the live collection scheduler also
+refreshes it after each collection cycle. The seeker dashboard displays the
+emerging/declining skill and job-role comparison charts and the model scores.
+
+To enable all four model implementations locally, install the optional
+forecasting dependencies from `backend`:
+
+```powershell
+pip install -r requirements.txt
+pip install -r requirements-ml.txt
+```
+
+`statsmodels` (ARIMA) is part of `requirements.txt`; Prophet and
+N-BEATS/TFT are provided by `requirements-ml.txt`. When a user opens the report,
+the frontend automatically trains and stores an initial forecast if the database
+does not yet contain one. Model import or training failures are included in the
+report rather than silently replaced with made-up scores. Forecast endpoints are
+documented below.
+
+---
+
 ## 📝 API Endpoints Specification
 
 ### 1. Autonomous Data Collection, NLP Extraction, Skill Processing & Forecasting (Component 1)
@@ -371,6 +403,9 @@ The **Skill Processing Agent** ([`skill_processing_agent.py`](file:///e:/Sliit/Y
 | `GET` | `/api/forecast/agent/runs` | List recent autonomous agent collection runs |
 | `GET` | `/api/forecast/jobs` | Query collected job postings (keyword, company, location, pagination) |
 | `GET` | `/api/forecast/jobs/stats` | Aggregated data collection statistics & forecasting readiness |
+| `GET` | `/api/forecast/demand-forecast?horizon_months=36` | Read latest saved monthly skill and role forecasts with model scores |
+| `POST` | `/api/forecast/demand-forecast/train?horizon_months=36` | Train, compare, and persist all available forecasting models |
+| `GET` | `/api/forecast/demand-forecast/history` | Browse past forecast runs saved as forecasting knowledge |
 | `POST` | `/api/forecast/nlp/extract` | Deploy NLP Extraction Agent over collected jobs (batch processing) |
 | `POST` | `/api/forecast/nlp/extract-text` | Ad-hoc extraction of skills, seniority, experience, and education from raw text |
 | `GET` | `/api/forecast/nlp/runs` | List recent autonomous NLP extraction agent runs |
@@ -493,6 +528,13 @@ The **Skill Processing Agent** ([`skill_processing_agent.py`](file:///e:/Sliit/Y
 - `execution_summary` (Text JSON with telemetry, domain distribution, and co-occurrence pairs)
 - `error_message` (Text, Nullable)
 - `started_at`, `completed_at` (Timestamps with timezone)
+
+#### 6. `forecast_runs`
+- `id` (Integer, PK)
+- `run_id` (String 64, Unique, Indexed)
+- `horizon_months` (Integer, 1-36)
+- `result_json` (Text JSON with per-series forecasts, model evaluation metrics, selected models, and generated insights)
+- `created_at` (Timestamp with timezone)
 
 ---
 

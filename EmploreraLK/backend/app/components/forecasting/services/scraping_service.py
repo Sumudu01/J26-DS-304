@@ -487,6 +487,7 @@ class ScrapingService:
         from app.schemas.skill_processing import SkillProcessingGoal
         from app.components.forecasting.services.nlp_service import NLPService
         from app.components.forecasting.services.skill_processing_service import SkillProcessingService
+        from app.components.forecasting.services.forecasting_service import ForecastingService
         from app.components.forecasting.agents.job_posting_time_series_agent import (
             JobPostingTimeSeriesAgent,
         )
@@ -589,6 +590,23 @@ class ScrapingService:
                     "status": "failed",
                     "error": str(e4),
                 }
+            try:
+                forecast = ForecastingService.train_and_store(
+                    _db3,
+                    horizon_months=36,
+                )
+                results["stages"]["demand_forecast"] = {
+                    "status": "completed",
+                    "run_id": forecast["run_id"],
+                    "best_model": forecast["best_model"],
+                    "series_count": len(forecast["series"]),
+                }
+            except Exception as forecast_error:
+                logger.exception("Pipeline stage 5 (demand forecasting) failed")
+                results["stages"]["demand_forecast"] = {
+                    "status": "failed",
+                    "error": str(forecast_error),
+                }
             finally:
                 _db3.close()
 
@@ -598,7 +616,8 @@ class ScrapingService:
         results["status"] = "running"
         results["message"] = (
             f"Full pipeline triggered for '{target_role}'. "
-            "Data Collection → NLP Extraction → Skill Processing → Time-Series Analysis running autonomously."
+            "Data Collection → NLP Extraction → Skill Processing → Time-Series Analysis → "
+            "Model Evaluation and Demand Forecasting running autonomously."
         )
         return results
 
