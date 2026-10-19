@@ -1250,11 +1250,11 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
               {demandSubView === 'forecast' && (
               <>
-              <div className="bg-white p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 sm:mb-6">
+              <div className="bg-white p-3 sm:p-5 md:p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="mb-4 flex min-w-0 flex-col gap-3 sm:mb-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <h2 className="text-base font-bold text-gray-900">Future Job Market Demand Forecasting</h2>
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Model-validated monthly skill and job-role demand forecasts from the dataset and collected postings.</p>
+                    <h2 className="text-base font-bold leading-snug text-gray-900 sm:text-lg">Future Job Market Demand Forecasting</h2>
+                    <p className="mt-1 text-xs leading-relaxed text-gray-500">Explore monthly skill and job-role demand trends from collected job postings.</p>
                   </div>
                 </div>
 
