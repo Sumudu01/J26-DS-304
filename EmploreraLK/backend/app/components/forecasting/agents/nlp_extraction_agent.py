@@ -11,8 +11,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc
 
 from app.models.job_posting import JobPosting, NLPExtractionRun
-from app.components.forecasting.agents.job_description_ocr import extract_topjobs_image_text
-from app.components.forecasting.agents.data_collection_agent import is_it_related_job
 from app.schemas.nlp_extraction import (
     NLPExtractionGoal,
     NLPExtractionRunStatus,
@@ -358,22 +356,6 @@ class NLPExtractionAgent:
     def process_job_posting(self, job: JobPosting) -> JobNLPExtractionResult:
         """Process a single JobPosting instance and update its database record."""
         content = job.description_raw or ""
-        current_meta = job.get_metadata()
-        if not content and job.source == "TopJobs":
-            image_urls = current_meta.get("description_image_urls", [])
-            if isinstance(image_urls, str):
-                image_urls = [image_urls]
-            if image_urls:
-                content = extract_topjobs_image_text(image_urls) or ""
-                if content:
-                    job.description_raw = content
-                    current_meta["description_ocr"] = {
-                        "status": "completed",
-                        "image_count": len(image_urls),
-                        "extracted_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    job.set_metadata(current_meta)
-
         title = job.title or ""
 
         extraction = self.extract_skills_from_text(content, title)
@@ -387,6 +369,7 @@ class NLPExtractionAgent:
         job.status = "extracted"
 
         # Update metadata dictionary
+        current_meta = job.get_metadata()
         current_meta["nlp_extraction"] = {
             "extracted_at": datetime.now(timezone.utc).isoformat(),
             "skills_count": len(skills),
@@ -440,38 +423,12 @@ class NLPExtractionAgent:
         # Query candidates for extraction
         query = self.db.query(JobPosting)
         if not goal.force_reextract:
-            query = query.filter(or_(
-                JobPosting.status == "collected",
-                JobPosting.skills_extracted.is_(None),
-            ))
+            query = query.filter(or_(JobPosting.status == "collected", JobPosting.skills_extracted.is_(None)))
 
         if goal.source:
             query = query.filter(JobPosting.source.ilike(f"%{goal.source.strip()}%"))
 
-        candidates = query.order_by(desc(JobPosting.created_at)).limit(goal.batch_size).all()
-        if not goal.force_reextract and (not goal.source or "topjobs" in goal.source.lower()):
-            image_jobs = self.db.query(JobPosting).filter(
-                JobPosting.source == "TopJobs",
-                or_(JobPosting.description_raw.is_(None), JobPosting.description_raw == ""),
-                JobPosting.raw_metadata.ilike("%description_image_urls%"),
-            ).order_by(desc(JobPosting.created_at)).all()
-            selected_ids = {job.id for job in candidates}
-            image_candidates = []
-            for job in image_jobs:
-                metadata = job.get_metadata()
-                image_urls = metadata.get("description_image_urls", [])
-                if isinstance(image_urls, str):
-                    image_urls = [image_urls]
-                if image_urls and job.id not in selected_ids and is_it_related_job(job.title):
-                    image_candidates.append(job)
-                    selected_ids.add(job.id)
-            candidates = (image_candidates + candidates)[:goal.batch_size]
-            self._record_telemetry(
-                action="QUEUE_TOPJOBS_IMAGE_OCR",
-                thought="Included TopJobs image-only adverts for OCR, even if their skills were previously processed.",
-                observation=f"Queued {len(image_candidates)} TopJobs image-only postings for OCR.",
-                status="ok"
-            )
+        candidates: List[JobPosting] = query.order_by(desc(JobPosting.created_at)).limit(goal.batch_size).all()
 
         self._record_telemetry(
             action="FETCH_CANDIDATE_POSTS",

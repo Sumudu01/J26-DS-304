@@ -12,7 +12,6 @@ from app.core.config import settings
 from app.core.database import engine, SessionLocal
 from app.models.user import User
 from app.models import Base
-from app.components.skill_gap.models import ensure_candidate_ownership_columns
 from app.core.security import get_password_hash
 from app.api.v1 import api_router
 
@@ -89,7 +88,6 @@ async def lifespan(app: FastAPI):
     # Create all tables in Neon PostgreSQL (no-op if already exist)
     try:
         Base.metadata.create_all(bind=engine)
-        ensure_candidate_ownership_columns(engine)
         logger.info("Database tables created / verified.")
     except Exception as exc:
         logger.error("Failed to create database tables: %s", exc)
