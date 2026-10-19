@@ -40,7 +40,7 @@ def main():
         "--source",
         type=str,
         default=None,
-        help="Filter jobs by portal: 'LinkedIn' or 'TopJobs' (default: all)"
+        help="Filter jobs by portal: 'LinkedIn', 'TopJobs', or 'Rooster.jobs' (default: all)"
     )
     parser.add_argument(
         "--test-text",

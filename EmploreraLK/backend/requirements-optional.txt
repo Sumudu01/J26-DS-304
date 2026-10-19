@@ -1,0 +1,4 @@
+# Optional NLP and image OCR extras for non-serverless deployments.
+spacy>=3.8.0
+Pillow>=10.0.0
+pytesseract>=0.3.13

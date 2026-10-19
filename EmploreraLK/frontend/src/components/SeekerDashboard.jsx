@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Logo from './Logo.jsx'
 import NotificationCenter from './NotificationCenter.jsx'
-import DemandInsightsPanel from './DemandInsightsPanel.jsx'
+import FutureDemandForecastPanel from './FutureDemandForecastPanel.jsx'
 import CandidateProfileCollection from './CandidateProfileCollection.jsx'
 import TargetRoleInput from './TargetRoleInput.jsx'
 import { createNotification, getAuthHeaders } from './notificationsApi.js'
@@ -33,10 +33,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
 
   // API response states
   const [demandData] = useState([])
-  const [forecastHorizon, setForecastHorizon] = useState('2029') // 2027, 2028, 2029
-  const [demandInsights, setDemandInsights] = useState(null)
-  const [demandInsightsLoading, setDemandInsightsLoading] = useState(false)
-  const [demandInsightsError, setDemandInsightsError] = useState('')
 
   // Search demand state
   const [searchQuery, setSearchQuery] = useState('')
@@ -76,7 +72,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
   const [liveJobsPage, setLiveJobsPage] = useState(1)
   const [liveJobsLoading, setLiveJobsLoading] = useState(false)
   const [liveJobsError, setLiveJobsError] = useState('')
-  const [liveJobsSource, setLiveJobsSource] = useState('') // '', 'LinkedIn', 'TopJobs'
+  const [liveJobsSource, setLiveJobsSource] = useState('') // '', 'LinkedIn', 'TopJobs', 'Rooster.jobs'
   const [pipelineStatus, setPipelineStatus] = useState(null) // null | 'running' | 'done'
   const [pipelineTriggerLoading, setPipelineTriggerLoading] = useState(false)
   const [demandSubView, setDemandSubView] = useState('listings') // 'listings' | 'forecast'
@@ -118,28 +114,6 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
       fetchLiveJobs(1, '')
     }
   }, [activeTab, user.target_role, userSkillsKey])
-
-  const fetchDemandForecast = async () => {
-    setDemandInsightsLoading(true)
-    setDemandInsightsError('')
-    setDemandInsights(null)
-    try {
-      const res = await fetch(`${API_URL}/forecast/demand-insights?target_year=${forecastHorizon}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setDemandInsights(await res.json())
-    } catch (e) {
-      console.error('Error loading future demand insights', e)
-      setDemandInsightsError(e.message || 'Could not load demand insights.')
-    } finally {
-      setDemandInsightsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (activeTab === 'demand' && demandSubView === 'forecast') {
-      fetchDemandForecast()
-    }
-  }, [activeTab, demandSubView, forecastHorizon])
 
   const fetchGapAnalysis = async (targetRole = user.target_role) => {
     setIsSearchingGap(true)
@@ -996,6 +970,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                       <option value="">All Sources</option>
                       <option value="LinkedIn">LinkedIn</option>
                       <option value="TopJobs">TopJobs</option>
+                      <option value="Rooster.jobs">Rooster.jobs</option>
                     </select>
 
                     {/* Refresh button */}
@@ -1080,7 +1055,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                         <p className="text-xs text-gray-400 mt-1">
                           {hasSearched && searchQuery.trim()
                             ? 'Try another job title or skill keyword, or clear search to return to recommended roles.'
-                            : 'Trigger the AI pipeline to collect live job posts from LinkedIn & TopJobs for your target role.'}
+                            : 'Trigger the AI pipeline to collect live job posts from LinkedIn, TopJobs, and Rooster.jobs for your target role.'}
                         </p>
                       </div>
                       {!(hasSearched && searchQuery.trim()) && (
@@ -1207,10 +1182,25 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                                     job.source === 'LinkedIn'
                                       ? 'bg-blue-100 text-blue-700'
-                                      : 'bg-orange-100 text-orange-700'
+                                      : job.source_platforms?.includes('Rooster.jobs')
+                                        ? 'bg-violet-100 text-violet-700'
+                                        : 'bg-orange-100 text-orange-700'
                                   }`}>
-                                    {job.source}
+                                    {job.source_platforms?.length
+                                      ? job.source_platforms.join(' · ')
+                                      : job.source}
                                   </span>
+                                  {job.source_jobs?.filter((sourceJob) => sourceJob.job_link && sourceJob.job_link !== job.job_link).map((sourceJob) => (
+                                    <a
+                                      key={`${job.job_id}-${sourceJob.source}`}
+                                      href={sourceJob.job_link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[10px] font-semibold text-brand hover:underline"
+                                    >
+                                      View on {sourceJob.source}
+                                    </a>
+                                  ))}
                                   {job.posted_date_text && (
                                     <span className="text-[10px] text-gray-400">{job.posted_date_text}</span>
                                   )}
@@ -1264,28 +1254,12 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-5 sm:mb-6">
                   <div className="min-w-0">
                     <h2 className="text-base font-bold text-gray-900">Future Job Market Demand Forecasting</h2>
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Predictions on tech demand index calculated from LinkedIn, Indeed, and TopJobs.lk</p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 text-xs w-full sm:w-auto">
-                    <span className="text-gray-500 font-medium shrink-0">Forecast Horizon</span>
-                    <select
-                      value={forecastHorizon}
-                      onChange={(e) => setForecastHorizon(e.target.value)}
-                      className="w-full sm:w-auto border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-brand/20 outline-none"
-                    >
-                      <option value="2027">1-Year Outlook (2027)</option>
-                      <option value="2028">2-Year Outlook (2028)</option>
-                      <option value="2029">3-Year Outlook (2029)</option>
-                    </select>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">Model-validated monthly skill and job-role demand forecasts from the dataset and collected postings.</p>
                   </div>
                 </div>
 
               </div>
-              <DemandInsightsPanel
-                insights={demandInsights}
-                isLoading={demandInsightsLoading}
-                error={demandInsightsError}
-                onRetry={fetchDemandForecast}
+              <FutureDemandForecastPanel
                 onCollect={triggerPipeline}
                 canCollect={Boolean(user.target_role)}
               />
@@ -1885,7 +1859,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                 <form onSubmit={(e) => { e.preventDefault(); fetchMatchingJobs(jobSearchQuery, 1, matchingSource) }} className="flex flex-col gap-3 lg:flex-row lg:items-center">
                   <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input type="text" value={jobSearchQuery} onChange={(e) => setJobSearchQuery(e.target.value)} placeholder="Search by role, company, location, or skill" className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm outline-none transition-all placeholder:text-gray-400 focus:border-brand/40 focus:ring-2 focus:ring-brand/20" /></div>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <div className="relative"><Filter className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" /><select value={matchingSource} onChange={(e) => { setMatchingSource(e.target.value); fetchMatchingJobs(jobSearchQuery, 1, e.target.value) }} className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-8 text-xs font-semibold text-gray-600 outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/20 sm:w-36" aria-label="Filter by job source"><option value="">All sources</option><option value="LinkedIn">LinkedIn</option><option value="TopJobs">TopJobs</option></select></div>
+                    <div className="relative"><Filter className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" /><select value={matchingSource} onChange={(e) => { setMatchingSource(e.target.value); fetchMatchingJobs(jobSearchQuery, 1, e.target.value) }} className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-8 text-xs font-semibold text-gray-600 outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/20 sm:w-36" aria-label="Filter by job source"><option value="">All sources</option><option value="LinkedIn">LinkedIn</option><option value="TopJobs">TopJobs</option><option value="Rooster.jobs">Rooster.jobs</option></select></div>
                     <button type="submit" disabled={isSearchingJobs} className="flex items-center justify-center gap-1.5 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50">{isSearchingJobs ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}{isSearchingJobs ? 'Searching...' : 'Find matches'}</button>
                     {(jobSearchQuery || matchingSource) && <button type="button" onClick={() => { setJobSearchQuery(''); setMatchingSource(''); fetchMatchingJobs('', 1, '') }} className="rounded-lg border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 transition-all hover:bg-gray-50 hover:text-gray-700">Reset</button>}
                   </div>
@@ -1909,7 +1883,7 @@ function SeekerDashboard({ user, onUpdateUser, onLogout }) {
                     return (
                       <article key={job.id || job.job_id} className="group rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-brand/30 hover:shadow-md sm:p-5">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-                          <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}{job.description_text && <details className="mt-2 text-xs text-gray-600"><summary className="cursor-pointer font-semibold text-brand hover:text-brand-dark">Read full description</summary><p className="mt-2 whitespace-pre-line leading-relaxed">{job.description_text}</p></details>}{job.description_image_urls?.length > 0 && <div className="mt-3 space-y-2">{job.description_image_urls.map((imageUrl, imageIndex) => <a key={`${job.job_id}-advert-${imageIndex}`} href={imageUrl} target="_blank" rel="noopener noreferrer" className="block"><img src={imageUrl} alt={`${job.title} job advertisement`} loading="lazy" className="max-h-80 w-full rounded-lg border border-gray-100 bg-gray-50 object-contain object-left" onError={(event) => { event.currentTarget.hidden = true }} /></a>)}</div>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div></div></div>
+                          <div className="flex min-w-0 flex-1 gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand/15 to-cyan-100 text-base font-black text-brand">{(job.company || 'C').charAt(0).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-bold leading-tight text-gray-900 group-hover:text-brand">{job.title}</h3><p className="mt-1 text-xs font-semibold text-gray-600">{job.company}</p></div><span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">{job.source_platforms?.length ? job.source_platforms.join(' · ') : job.source}</span></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500"><span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{job.location}</span>{job.seniority_level && <span>{job.seniority_level}</span>}<span className="flex items-center gap-1"><Clock3 className="h-3 w-3" />{job.posted_date_text || 'Recently posted'}</span></div>{job.description_snippet && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gray-500">{job.description_snippet}</p>}{job.description_text && <details className="mt-2 text-xs text-gray-600"><summary className="cursor-pointer font-semibold text-brand hover:text-brand-dark">Read full description</summary><p className="mt-2 whitespace-pre-line leading-relaxed">{job.description_text}</p></details>}{job.description_image_urls?.length > 0 && <div className="mt-3 space-y-2">{job.description_image_urls.map((imageUrl, imageIndex) => <a key={`${job.job_id}-advert-${imageIndex}`} href={imageUrl} target="_blank" rel="noopener noreferrer" className="block"><img src={imageUrl} alt={`${job.title} job advertisement`} loading="lazy" className="max-h-80 w-full rounded-lg border border-gray-100 bg-gray-50 object-contain object-left" onError={(event) => { event.currentTarget.hidden = true }} /></a>)}</div>}{job.source_jobs?.some((sourceJob) => sourceJob.job_link && sourceJob.job_link !== job.job_link) && <div className="mt-2 flex flex-wrap gap-3">{job.source_jobs.filter((sourceJob) => sourceJob.job_link && sourceJob.job_link !== job.job_link).map((sourceJob) => <a key={`${job.job_id}-${sourceJob.source}`} href={sourceJob.job_link} target="_blank" rel="noopener noreferrer" className="text-[10px] font-semibold text-brand hover:underline">View on {sourceJob.source}</a>)}</div>}<div className="mt-3 flex flex-wrap gap-1.5">{(job.skills_extracted || []).slice(0, 8).map((skill, index) => <span key={`${skill}-${index}`} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${overlap.includes(String(skill).toLowerCase()) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>{overlap.includes(String(skill).toLowerCase()) ? '✓ ' : ''}{skill}</span>)}</div></div></div>
                           <div className="flex shrink-0 items-center justify-between gap-4 border-t border-gray-100 pt-3 lg:w-32 lg:flex-col lg:items-center lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0"><div className="text-center"><p className={`text-2xl font-black ${matchScore >= 70 ? 'text-emerald-600' : matchScore >= 40 ? 'text-amber-600' : 'text-gray-500'}`}>{matchScore}%</p><p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Skill fit</p><p className="mt-1 text-[10px] text-gray-400">{job.skill_match_count} shared skill{job.skill_match_count === 1 ? '' : 's'}</p></div>{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-dark">View role <ExternalLink className="h-3 w-3" /></a> : <span className="text-[10px] text-gray-400">Link unavailable</span>}</div>
                         </div>
                       </article>
