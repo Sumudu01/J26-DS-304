@@ -7,9 +7,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements and install the full non-serverless backend dependencies.
+COPY requirements.txt requirements-optional.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-optional.txt
 
 # Copy the rest of the application
 COPY . .

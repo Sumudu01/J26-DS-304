@@ -381,6 +381,7 @@ forecasting dependencies from `backend`:
 
 ```powershell
 pip install -r requirements.txt
+pip install -r requirements-optional.txt
 pip install -r requirements-ml.txt
 ```
 
@@ -390,6 +391,12 @@ the frontend automatically trains and stores an initial forecast if the database
 does not yet contain one. Model import or training failures are included in the
 report rather than silently replaced with made-up scores. Forecast endpoints are
 documented below.
+
+Vercel installs only `requirements.txt`. Optional spaCy and image OCR dependencies
+are in `requirements-optional.txt` to keep the serverless function below Vercel's
+bundle-size limit. Local and Docker deployments can install that file for the full
+NLP/OCR experience; if omitted, NLP falls back to the built-in skill rules and image
+OCR is skipped.
 
 ---
 
@@ -565,6 +572,9 @@ source .venv/bin/activate
 
 # Install all backend dependencies
 pip install -r requirements.txt
+
+# Install optional spaCy and image OCR support
+pip install -r requirements-optional.txt
 
 # Download spaCy English NLP model pipeline
 python -m spacy download en_core_web_sm

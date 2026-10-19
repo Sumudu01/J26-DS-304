@@ -2,7 +2,7 @@ import io
 import logging
 import os
 import re
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -14,15 +14,13 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
 
 
-def _load_ocr_dependencies():
+def _load_ocr_dependencies() -> Optional[Tuple[object, object, object]]:
     try:
         import pytesseract
         from PIL import Image, ImageOps
     except ImportError as error:
-        raise RuntimeError(
-            "TopJobs image OCR dependencies are missing. Install backend requirements "
-            "with `python -m pip install -r requirements.txt`."
-        ) from error
+        logger.warning("Optional OCR dependencies are missing; skipping image OCR: %s", error)
+        return None
 
     if os.environ.get("TESSERACT_CMD"):
         pytesseract.pytesseract.tesseract_cmd = os.environ["TESSERACT_CMD"]
@@ -48,7 +46,10 @@ def extract_topjobs_image_text(image_urls: Iterable[str]) -> Optional[str]:
     if not valid_image_urls:
         return None
 
-    pytesseract, Image, ImageOps = _load_ocr_dependencies()
+    dependencies = _load_ocr_dependencies()
+    if dependencies is None:
+        return None
+    pytesseract, Image, ImageOps = dependencies
     extracted_text = []
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; EmploreraLKJobDescriptionOCR/1.0)",
