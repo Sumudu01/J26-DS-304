@@ -47,7 +47,7 @@ class SkillProcessingGoal(BaseModel):
     )
     source: Optional[str] = Field(
         default=None,
-        description="Optional platform filter: 'LinkedIn', 'TopJobs', or None for all"
+        description="Optional platform filter: 'LinkedIn', 'TopJobs', 'Rooster.jobs', or None for all"
     )
     fuzzy_threshold: float = Field(
         default=0.85,

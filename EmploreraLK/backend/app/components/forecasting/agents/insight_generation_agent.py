@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List
 
 
@@ -9,6 +9,8 @@ class InsightGenerationAgent:
     SIGNIFICANT_CHANGE_PERCENT = 10.0
     MAX_ANNUAL_GROWTH_PERCENT = 200.0
     MAX_ANNUAL_DECLINE_PERCENT = -80.0
+    MAX_REPORTED_GROWTH_PERCENT = 100.0
+    MAX_REPORTED_DECLINE_PERCENT = -80.0
 
     @classmethod
     def generate(
@@ -154,4 +156,149 @@ class InsightGenerationAgent:
             "emerging_skills": emerging[:6],
             "declining_skills": declining[:6],
             "steady_skills": steady[:6],
+        }
+
+    @classmethod
+    def generate_model_forecast(
+        cls,
+        series: List[Dict[str, Any]],
+        *,
+        horizon_months: int,
+        source_postings: int,
+        generated_at: datetime,
+    ) -> Dict[str, Any]:
+        """Explain model-selected monthly forecasts as emerging, declining, or steady."""
+        trends: Dict[str, List[Dict[str, Any]]] = {
+            "emerging_skills": [],
+            "declining_skills": [],
+            "steady_skills": [],
+            "emerging_roles": [],
+            "declining_roles": [],
+            "steady_roles": [],
+        }
+
+        for item in series:
+            change = item["expected_change_percent"]
+            raw_change = change
+            if change is not None:
+                change = max(
+                    cls.MAX_REPORTED_DECLINE_PERCENT,
+                    min(cls.MAX_REPORTED_GROWTH_PERCENT, change),
+                )
+            kind = item["series_type"]
+            if change is None:
+                classification = "steady"
+            elif change >= cls.SIGNIFICANT_CHANGE_PERCENT:
+                classification = "emerging"
+            elif change <= -cls.SIGNIFICANT_CHANGE_PERCENT:
+                classification = "declining"
+            else:
+                classification = "steady"
+
+            label = item["name"]
+            bounded_note = ""
+            if item.get("change_percent_capped"):
+                limit = (
+                    cls.MAX_REPORTED_GROWTH_PERCENT
+                    if change >= 0
+                    else abs(cls.MAX_REPORTED_DECLINE_PERCENT)
+                )
+                bounded_note = (
+                    f" The displayed percentage is capped at {limit:.0f}% because the "
+                    "projected change is unusually large relative to the recent baseline."
+                )
+            if classification == "emerging":
+                explanation = (
+                    "Average monthly demand is projected "
+                    f"to increase by {change:.1f}% over the requested horizon."
+                    f"{bounded_note}"
+                )
+                recommendation = f"Prioritize practical experience and portfolio work in {label}."
+            elif classification == "declining":
+                explanation = (
+                    "Average monthly demand is projected "
+                    f"to decrease by {abs(change):.1f}% over the requested horizon."
+                    f"{bounded_note}"
+                )
+                recommendation = f"Keep {label} in context and pair it with growing adjacent skills or roles."
+            else:
+                explanation = (
+                    "Demand is projected to remain broadly stable "
+                    "over the requested horizon."
+                )
+                recommendation = f"Maintain relevant experience in {label} and monitor new market signals."
+
+            report = {
+                **item,
+                "expected_change_percent": change,
+                "change_percent_capped": change != raw_change,
+                "classification": classification,
+                "explanation": explanation,
+                "recommendation": recommendation,
+                "confidence": (
+                    "moderate"
+                    if item["observations"] >= 12 and source_postings >= 30
+                    else "early signal"
+                ),
+            }
+            trends[f"{classification}_{kind}"].append(report)
+
+        for name in trends:
+            trends[name].sort(
+                key=lambda item: (
+                    item["expected_change_percent"] or 0,
+                    item["forecasted_monthly_average"],
+                ),
+                reverse=name.startswith("emerging") or name.startswith("steady"),
+            )
+
+        emerging = sorted(
+            trends["emerging_skills"] + trends["emerging_roles"],
+            key=lambda item: item["expected_change_percent"] or 0,
+            reverse=True,
+        )
+        declining = sorted(
+            trends["declining_skills"] + trends["declining_roles"],
+            key=lambda item: item["expected_change_percent"] or 0,
+        )
+        if emerging and declining:
+            summary = (
+                f"Based on {source_postings} dated postings, over the next "
+                f"{horizon_months} months demand for "
+                f"{emerging[0]['name']} ({emerging[0]['series_type'][:-1]}) is projected to rise "
+                f"{emerging[0]['expected_change_percent']:.1f}%, while demand for "
+                f"{declining[0]['name']} ({declining[0]['series_type'][:-1]}) is projected to fall "
+                f"{abs(declining[0]['expected_change_percent']):.1f}%."
+            )
+        elif emerging:
+            summary = (
+                f"Based on {source_postings} dated postings, over the next "
+                f"{horizon_months} months {emerging[0]['name']} "
+                f"({emerging[0]['series_type'][:-1]}) is the strongest growth signal, with "
+                f"projected demand up {emerging[0]['expected_change_percent']:.1f}%."
+            )
+        elif declining:
+            summary = (
+                f"Based on {source_postings} dated postings, over the next "
+                f"{horizon_months} months {declining[0]['name']} "
+                f"({declining[0]['series_type'][:-1]}) is the clearest decline signal, with "
+                f"projected demand down {abs(declining[0]['expected_change_percent']):.1f}%."
+            )
+        else:
+            summary = (
+                f"Based on {source_postings} dated postings, the selected models project broadly "
+                f"stable demand for the tracked skills and roles over the next {horizon_months} months."
+            )
+
+        return {
+            "generated_at": generated_at.astimezone(timezone.utc).isoformat(),
+            "summary": summary,
+            "confidence": (
+                "moderate"
+                if source_postings >= 30 and any(item["observations"] >= 12 for item in series)
+                else "early signal"
+            ),
+            "source_postings": source_postings,
+            "horizon_months": horizon_months,
+            **trends,
         }

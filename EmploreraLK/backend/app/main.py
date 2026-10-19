@@ -12,8 +12,12 @@ from app.core.config import settings
 from app.core.database import engine, SessionLocal
 from app.models.user import User
 from app.models import Base
+from app.components.skill_gap.models import ensure_candidate_ownership_columns
 from app.core.security import get_password_hash
 from app.api.v1 import api_router
+from app.components.forecasting.services.job_collection_scheduler import (
+    LiveJobCollectionScheduler,
+)
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -88,6 +92,7 @@ async def lifespan(app: FastAPI):
     # Create all tables in Neon PostgreSQL (no-op if already exist)
     try:
         Base.metadata.create_all(bind=engine)
+        ensure_candidate_ownership_columns(engine)
         logger.info("Database tables created / verified.")
     except Exception as exc:
         logger.error("Failed to create database tables: %s", exc)
@@ -103,12 +108,21 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    scheduler = None
+    if settings.JOB_SCRAPER_ENABLED:
+        scheduler = LiveJobCollectionScheduler(
+            interval_minutes=settings.JOB_SCRAPER_INTERVAL_MINUTES
+        )
+        scheduler.start()
+
     logger.info(
         "EmploreraLK API is ready on http://%s:%s",
         settings.HOST,
         settings.PORT,
     )
     yield
+    if scheduler:
+        scheduler.stop()
     logger.info("EmploreraLK API shutting down.")
 
 
@@ -180,4 +194,3 @@ async def health_check() -> dict:
         "version": "1.0.0",
         "environment": settings.ENVIRONMENT,
     }
-
