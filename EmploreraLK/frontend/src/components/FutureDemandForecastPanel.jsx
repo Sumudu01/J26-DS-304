@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Activity, RefreshCw } from 'lucide-react'
 import { API_URL } from '../App'
 
 const HORIZONS = [3, 6, 12, 24, 36]
 
 function DemandLineChart({ title, items, selectedName, onSelect, horizon }) {
+  const chartContainer = useRef(null)
+  const [chartWidth, setChartWidth] = useState(360)
   const selected = items.find((item) => item.name === selectedName) || items[0]
   const history = selected?.history || []
   const forecast = selected?.forecast || []
   const points = [...history, ...forecast]
-  const width = 760
+  const width = chartWidth
   const height = 280
-  const padding = { top: 18, right: 20, bottom: 42, left: 48 }
+  const padding = { top: 18, right: 12, bottom: 42, left: width < 400 ? 38 : 48 }
   const plotWidth = width - padding.left - padding.right
   const plotHeight = height - padding.top - padding.bottom
   const highest = Math.max(1, ...points.map((point) => Number(point.demand) || 0))
@@ -39,10 +41,20 @@ function DemandLineChart({ title, items, selectedName, onSelect, horizon }) {
     { month: 'short', year: '2-digit' },
   )
 
+  useEffect(() => {
+    const container = chartContainer.current
+    if (!container) return undefined
+    const observer = new ResizeObserver(([entry]) => {
+      setChartWidth(Math.max(280, Math.round(entry.contentRect.width)))
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:p-5">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h3 className="text-sm font-bold text-gray-900">{title}</h3>
           <p className="mt-1 text-[11px] text-gray-500">Monthly job-posting demand, past and projected</p>
         </div>
@@ -51,7 +63,7 @@ function DemandLineChart({ title, items, selectedName, onSelect, horizon }) {
             aria-label={`Choose ${title.toLowerCase()}`}
             value={selected?.name || ''}
             onChange={(event) => onSelect(event.target.value)}
-            className="max-w-48 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700"
+            className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 sm:max-w-48"
           >
             {items.map((item) => (
               <option key={item.name} value={item.name}>
@@ -67,9 +79,9 @@ function DemandLineChart({ title, items, selectedName, onSelect, horizon }) {
         </p>
       ) : (
         <>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="font-semibold text-gray-800">{selected.name}</span>
-            <span className={`rounded-full px-2.5 py-1 font-bold capitalize ${
+          <div className="mt-4 flex min-w-0 flex-col items-start gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+            <span className="max-w-full break-words font-semibold text-gray-800">{selected.name}</span>
+            <span className={`max-w-full rounded-full px-2.5 py-1 font-bold capitalize ${
               selected.classification === 'emerging'
                 ? 'bg-emerald-50 text-emerald-700'
                 : selected.classification === 'declining'
@@ -79,16 +91,17 @@ function DemandLineChart({ title, items, selectedName, onSelect, horizon }) {
               {selected.classification} · {selected.expected_change_percent > 0 ? '+' : ''}{selected.expected_change_percent}%
             </span>
           </div>
-          <div className="mt-2 flex items-center gap-4 text-[10px] text-gray-500">
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-gray-500">
             <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 bg-blue-600" />Past demand</span>
             <span className="flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed border-emerald-600" />Forecast</span>
           </div>
-          <div className="mt-2 w-full overflow-x-auto">
+          <div ref={chartContainer} className="mt-2 w-full min-w-0">
             <svg
               viewBox={`0 0 ${width} ${height}`}
-              className="min-w-[560px] w-full"
+              className="block h-auto w-full"
               role="img"
               aria-label={`${title} for ${selected.name}: historical and forecast monthly job postings`}
+              preserveAspectRatio="none"
             >
               {[0, 1, 2, 3, 4].map((tick) => {
                 const value = yMaximum * tick / 4
@@ -225,7 +238,7 @@ function FutureDemandForecastPanel({ onCollect, canCollect }) {
 
   if (loading && !report) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-600">
+      <div className="rounded-xl border border-gray-200 bg-white p-5 text-center text-sm text-gray-600 sm:p-8">
         <span className="mx-auto block h-6 w-6 animate-spin rounded-full border-2 border-brand/20 border-t-brand" />
         <p className="mt-3 font-semibold">{training || loading ? 'Preparing the first forecast report…' : 'Loading the latest forecast report…'}</p>
         <p className="mt-1 text-xs text-gray-500">Preparing practical skill and job-role demand insights.</p>
@@ -235,7 +248,7 @@ function FutureDemandForecastPanel({ onCollect, canCollect }) {
 
   if (!report?.available && !report?.series) {
     return (
-      <section className="rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm">
+      <section className="rounded-xl border border-gray-200 bg-white p-4 text-center shadow-sm sm:p-6">
         <Activity className="mx-auto h-8 w-8 text-brand" />
         <h3 className="mt-3 text-sm font-bold text-gray-900">The forecast report could not be prepared</h3>
         <p className="mx-auto mt-2 max-w-xl text-xs leading-relaxed text-gray-500">
@@ -257,32 +270,32 @@ function FutureDemandForecastPanel({ onCollect, canCollect }) {
   const skillSeries = (report.series || []).filter((item) => item.series_type === 'skills')
   const roleSeries = (report.series || []).filter((item) => item.series_type === 'roles')
   return (
-    <div className="space-y-4">
-      <section className="flex flex-col gap-3 rounded-xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 p-5 text-white shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <div className="w-full min-w-0 space-y-3 sm:space-y-4">
+      <section className="flex min-w-0 flex-col gap-3 rounded-xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 p-4 text-white shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="min-w-0">
           <h3 className="text-base font-bold">Future job-market demand</h3>
-          <p className="mt-1 text-xs text-blue-100/80">
+          <p className="mt-1 text-xs leading-relaxed text-blue-100/80">
             Explore how skill and job-role demand may change, based on {report.source_postings} job postings.
           </p>
         </div>
-        <label className="shrink-0 text-xs font-semibold text-blue-100">
-            Forecast period
-            <select
-              value={horizon}
-              onChange={(event) => {
-                setLoading(true)
-                setHorizon(Number(event.target.value))
-              }}
-              className="mt-1 block rounded-lg border border-white/20 bg-slate-800 px-3 py-2 text-white"
-            >
-              {HORIZONS.map((months) => <option key={months} value={months}>{months} months</option>)}
-            </select>
+        <label className="w-full text-xs font-semibold text-blue-100 sm:w-auto sm:shrink-0">
+          Forecast period
+          <select
+            value={horizon}
+            onChange={(event) => {
+              setLoading(true)
+              setHorizon(Number(event.target.value))
+            }}
+            className="mt-1 block w-full rounded-lg border border-white/20 bg-slate-800 px-3 py-2 text-white sm:w-auto"
+          >
+            {HORIZONS.map((months) => <option key={months} value={months}>{months} months</option>)}
+          </select>
         </label>
       </section>
 
       {error && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800">{error}</div>}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 sm:gap-4">
         <DemandLineChart
           title="Skill demand forecast"
           items={skillSeries}
@@ -302,8 +315,8 @@ function FutureDemandForecastPanel({ onCollect, canCollect }) {
         Solid lines show postings already collected. Dashed lines show forecast demand; projections are estimates, not guaranteed vacancies.
       </p>
 
-      <div className="flex justify-end">
-        <button onClick={trainForecast} disabled={training} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 disabled:opacity-60">
+      <div className="flex justify-stretch sm:justify-end">
+        <button onClick={trainForecast} disabled={training} className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-xs font-semibold text-gray-700 disabled:opacity-60 sm:w-auto sm:py-2">
           <RefreshCw className={`h-3.5 w-3.5 ${training ? 'animate-spin' : ''}`} />
           {training ? 'Updating outlook…' : 'Refresh demand outlook'}
         </button>
