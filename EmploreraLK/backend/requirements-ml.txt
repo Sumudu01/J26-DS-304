@@ -12,3 +12,6 @@ faiss-cpu>=1.8.0
 numpy>=1.26.0
 sentencepiece>=0.2.0
 protobuf>=5.0.0
+prophet>=1.1.5
+neuralforecast>=2.0.0,<3.0.0
+packaging>=24.2,<25

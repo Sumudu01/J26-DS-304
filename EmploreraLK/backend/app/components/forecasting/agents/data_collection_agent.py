@@ -56,7 +56,7 @@ class JobData:
     posted_date_text: str
     posted_timestamp: Optional[datetime] = None
     job_id: Optional[str] = None
-    source: str = "LinkedIn"  # "LinkedIn" | "TopJobs" | "Cross-Platform"
+    source: str = "LinkedIn"  # "LinkedIn" | "TopJobs" | "Rooster.jobs" | "Cross-Platform"
     search_keyword: Optional[str] = None
     quality_score: int = 100
     description_raw: Optional[str] = None
@@ -96,6 +96,7 @@ class AgentExecutionReport:
     status: str  # completed, partial, failed, rate_limited
     duration_seconds: float
     sources_scraped: List[str] = field(default_factory=list)
+    collected_job_ids: List[str] = field(default_factory=list)
     telemetry_trace: List[Dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -124,6 +125,14 @@ class TopJobsConfig:
     MAX_DELAY = 3.5
 
 
+class RoosterJobsConfig:
+    """Configuration for the public Rooster.jobs job search API."""
+    BASE_URL = "https://api.rooster.jobs/jobSearch/"
+    SEARCH_URL = f"{BASE_URL}jobs/search"
+    JOB_URL = "https://rooster.jobs/jobs/{job_id}"
+    PAGE_SIZE = 20
+
+
 class GlobalScraperConfig:
     """Common browser simulation settings."""
     USER_AGENTS = [
@@ -148,7 +157,7 @@ class GlobalScraperConfig:
 class JobDeduplicationEngine:
     """
     Multi-stage semantic & fuzzy deduplication engine.
-    Detects identical and similar job postings across LinkedIn, TopJobs,
+    Detects identical and similar job postings across LinkedIn, TopJobs, Rooster.jobs,
     and previous database records to guarantee unique postings.
     """
 
@@ -549,14 +558,128 @@ class TopJobsCollector:
             return None, []
 
 
+class RoosterJobsCollector:
+    """Collector for public job listings from Rooster.jobs."""
+
+    def __init__(self, session: requests.Session):
+        self.session = session
+
+    def fetch_listings(
+        self,
+        keyword: str,
+        headers: Dict[str, str],
+        max_jobs: int,
+        location: str,
+    ) -> List[Dict[str, Any]]:
+        listings = []
+        page = 1
+        self.last_request_count = 0
+        while len(listings) < max_jobs:
+            page_size = min(RoosterJobsConfig.PAGE_SIZE, max_jobs - len(listings))
+            payload = {
+                "query": [keyword],
+                "limit": page_size,
+                "page": page,
+                "filters": {"country": "Sri Lanka"},
+            }
+            try:
+                self.last_request_count += 1
+                response = self.session.post(
+                    RoosterJobsConfig.SEARCH_URL,
+                    json=payload,
+                    headers=headers,
+                    timeout=20,
+                )
+                response.raise_for_status()
+                result = response.json()
+            except (requests.RequestException, ValueError) as error:
+                logger.error("Rooster.jobs search failed on page %d: %s", page, error)
+                break
+
+            body = result.get("body") if isinstance(result, dict) else None
+            page_listings = body.get("data") if isinstance(body, dict) else None
+            if not isinstance(page_listings, list):
+                logger.error("Rooster.jobs search returned an invalid response on page %d.", page)
+                break
+            valid_listings = [item for item in page_listings if isinstance(item, dict)]
+            if location.strip().casefold() not in {"", "sri lanka"}:
+                location_term = location.strip().casefold()
+                valid_listings = [
+                    item
+                    for item in valid_listings
+                    if location_term in str(item.get("location") or "").casefold()
+                ]
+            listings.extend(valid_listings)
+            if len(page_listings) < page_size:
+                break
+            page += 1
+
+        return listings[:max_jobs]
+
+    @staticmethod
+    def parse_job(item: Dict[str, Any], keyword: str) -> Optional[JobData]:
+        job_id = item.get("id")
+        title = str(item.get("title") or "").strip()
+        if job_id is None or not title:
+            return None
+
+        description = item.get("description")
+        if description:
+            description = BeautifulSoup(str(description), "html.parser").get_text(
+                separator="\n",
+                strip=True,
+            )
+            description = re.sub(r"(?m)^#{1,6}\s*", "", description)
+            description = re.sub(
+                r"\*\*(.*?)\*\*|__(.*?)__",
+                lambda match: match.group(1) or match.group(2),
+                description,
+            )
+            description = re.sub(r"(?m)^\s*[-*]\s+", "- ", description)
+            description = re.sub(r"\n{3,}", "\n\n", description).strip() or None
+
+        posted_date_text = str(item.get("created_at") or "").strip()
+        posted_timestamp = None
+        if posted_date_text:
+            try:
+                posted_timestamp = datetime.fromisoformat(
+                    posted_date_text.replace("Z", "+00:00")
+                )
+                if posted_timestamp.tzinfo is None:
+                    posted_timestamp = posted_timestamp.replace(tzinfo=timezone.utc)
+            except ValueError:
+                logger.warning("Unrecognized Rooster.jobs posted date: %s", posted_date_text)
+
+        return JobData(
+            title=title,
+            company=str(item.get("company_name") or "Unknown Company").strip(),
+            location=str(item.get("location") or "Sri Lanka").strip(),
+            job_link=RoosterJobsConfig.JOB_URL.format(job_id=quote(str(job_id))),
+            posted_date_text=posted_date_text or "Recently",
+            posted_timestamp=posted_timestamp,
+            job_id=f"rooster_{job_id}",
+            source="Rooster.jobs",
+            search_keyword=keyword,
+            quality_score=95,
+            description_raw=description,
+            raw_metadata={
+                "portal": "Rooster.jobs",
+                "rooster_job_id": str(job_id),
+                "job_type": item.get("job_type"),
+                "department": item.get("department"),
+                "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
+            },
+        )
+
+
 class LinkedInDataCollectionAgent:
     """
-    Autonomous Job Data Collection Agent for LinkedIn & TopJobs.lk.
+    Autonomous Job Data Collection Agent for LinkedIn, TopJobs.lk, and Rooster.jobs.
     
     Part of the EmploreraLK Job Market Demand Forecasting Engine (Module 1).
     Key Capabilities:
-      1. Dual-Platform Crawling: Autonomously collects vacancies from both LinkedIn
-         and TopJobs.lk with complete job descriptions.
+      1. Multi-Platform Crawling: Autonomously collects vacancies from LinkedIn,
+         TopJobs.lk, and Rooster.jobs with complete job descriptions.
       2. Multi-Stage Deduplication: Detects exact ID duplicates, identical URLs,
          and fuzzy cross-platform duplicates (same position cross-posted on both portals).
       3. Self-Healing & Polite Pacing: Senses HTTP 429 rate limiting, triggers exponential
@@ -570,12 +693,15 @@ class LinkedInDataCollectionAgent:
         self.session = self._setup_session()
         self.linkedin_collector = LinkedInCollector(self.session)
         self.topjobs_collector = TopJobsCollector(self.session)
+        self.rooster_collector = RoosterJobsCollector(self.session)
 
         # Episodic Memory banks
         self.memory_known_ids: Set[str] = set()
         self.memory_known_urls: Set[str] = set()
         self.memory_known_jobs: List[JobData] = []
         self.memory_topjobs_missing_descriptions: Set[str] = set()
+        self.duplicate_job_ids_for_nlp: Set[str] = set()
+        self.updated_existing_records = False
         self.telemetry_trace: List[AgentStepTelemetry] = []
 
         self._load_memory()
@@ -608,13 +734,29 @@ class LinkedInDataCollectionAgent:
                     JobPosting.company,
                     JobPosting.source,
                     JobPosting.description_raw,
+                    JobPosting.raw_metadata,
                 ).all()
 
                 for row in existing:
+                    try:
+                        metadata = json.loads(row[6] or "{}")
+                    except (TypeError, ValueError):
+                        metadata = {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
                     if row[0]:
                         self.memory_known_ids.add(row[0])
                         if row[4] == "TopJobs" and not (row[5] or "").strip():
                             self.memory_topjobs_missing_descriptions.add(row[0])
+                    source_jobs = metadata.get("source_jobs", [])
+                    if isinstance(source_jobs, list):
+                        for source_job in source_jobs:
+                            if not isinstance(source_job, dict):
+                                continue
+                            if source_job.get("job_id"):
+                                self.memory_known_ids.add(str(source_job["job_id"]))
+                            if source_job.get("job_link"):
+                                self.memory_known_urls.add(str(source_job["job_link"]))
                     if row[1]:
                         self.memory_known_urls.add(row[1])
                     if row[2] and row[3]:
@@ -627,7 +769,8 @@ class LinkedInDataCollectionAgent:
                                 job_link=row[1] or "",
                                 posted_date_text="",
                                 job_id=row[0],
-                                source=row[4] or "Existing"
+                                source=row[4] or "Existing",
+                                raw_metadata=metadata,
                             )
                         )
                 logger.info(
@@ -659,26 +802,128 @@ class LinkedInDataCollectionAgent:
         (exact ID, exact URL, or fuzzy cross-platform match).
         Returns: (is_duplicate, reason)
         """
-        # 1. Exact ID
-        if candidate.job_id and candidate.job_id in self.memory_known_ids:
-            return True, f"Exact Job ID match ({candidate.job_id})"
+        duplicate, reason = self._find_duplicate_job(candidate, similarity_threshold)
+        if duplicate:
+            self._merge_duplicate_source(candidate, duplicate)
+            return True, reason
+        return False, "Unique post"
 
-        # 2. Exact Link
-        if candidate.job_link and candidate.job_link in self.memory_known_urls:
-            return True, f"Exact URL match ({candidate.job_link})"
-
-        # 3. Fuzzy match against memory bank (Cross-Platform & Intra-Platform)
+    def _find_duplicate_job(
+        self,
+        candidate: JobData,
+        similarity_threshold: float,
+    ) -> Tuple[Optional[JobData], str]:
         for existing in self.memory_known_jobs:
+            metadata = (
+                existing.raw_metadata
+                if isinstance(existing.raw_metadata, dict)
+                else {}
+            )
+            source_jobs = metadata.get("source_jobs", [])
+            source_job_ids = {
+                str(source_job.get("job_id"))
+                for source_job in source_jobs
+                if isinstance(source_job, dict) and source_job.get("job_id")
+            } if isinstance(source_jobs, list) else set()
+            source_job_links = {
+                str(source_job.get("job_link"))
+                for source_job in source_jobs
+                if isinstance(source_job, dict) and source_job.get("job_link")
+            } if isinstance(source_jobs, list) else set()
+            if candidate.job_id and (
+                candidate.job_id == existing.job_id or candidate.job_id in source_job_ids
+            ):
+                return existing, f"Exact Job ID match ({candidate.job_id})"
+            if candidate.job_link and (
+                candidate.job_link == existing.job_link
+                or candidate.job_link in source_job_links
+            ):
+                return existing, f"Exact URL match ({candidate.job_link})"
+
             is_similar, score, reason = JobDeduplicationEngine.are_jobs_similar(
-                candidate.title, candidate.company,
-                existing.title, existing.company,
-                threshold=similarity_threshold
+                candidate.title,
+                candidate.company,
+                existing.title,
+                existing.company,
+                threshold=similarity_threshold,
             )
             if is_similar:
-                # Same position cross-posted on both platforms
-                return True, f"Cross-platform match with {existing.source} post '{existing.title}' at '{existing.company}' (Score: {score:.2f} — {reason})"
+                return existing, (
+                    f"Cross-platform match with {existing.source} post "
+                    f"'{existing.title}' at '{existing.company}' "
+                    f"(Score: {score:.2f} — {reason})"
+                )
+        return None, "Unique post"
 
-        return False, "Unique post"
+    def _merge_duplicate_source(
+        self,
+        candidate: JobData,
+        existing: JobData,
+    ) -> bool:
+        """Keep source links and provenance on the canonical job when deduplicating."""
+        metadata = dict(existing.raw_metadata)
+        sources = metadata.get("source_platforms", [])
+        if not isinstance(sources, list):
+            sources = []
+        sources = list(dict.fromkeys(
+            [str(source) for source in sources if source]
+            + [existing.source, candidate.source]
+        ))
+        source_jobs = metadata.get("source_jobs", [])
+        if not isinstance(source_jobs, list):
+            source_jobs = []
+        for job in (existing, candidate):
+            reference = {
+                "source": job.source,
+                "job_id": job.job_id,
+                "job_link": job.job_link,
+            }
+            if not any(
+                isinstance(saved, dict)
+                and saved.get("source") == reference["source"]
+                and saved.get("job_id") == reference["job_id"]
+                for saved in source_jobs
+            ):
+                source_jobs.append(reference)
+        metadata["source_platforms"] = sources
+        metadata["source_jobs"] = source_jobs
+        image_urls = metadata.get("description_image_urls", [])
+        candidate_image_urls = candidate.raw_metadata.get("description_image_urls", [])
+        if isinstance(image_urls, str):
+            image_urls = [image_urls]
+        if isinstance(candidate_image_urls, str):
+            candidate_image_urls = [candidate_image_urls]
+        if not isinstance(image_urls, list):
+            image_urls = []
+        if not isinstance(candidate_image_urls, list):
+            candidate_image_urls = []
+        if candidate_image_urls:
+            metadata["description_image_urls"] = list(dict.fromkeys(
+                [*image_urls, *candidate_image_urls]
+            ))
+        existing.raw_metadata = metadata
+        if candidate.description_raw and not existing.description_raw:
+            existing.description_raw = candidate.description_raw
+        elif (
+            candidate.description_raw
+            and candidate.description_raw.casefold() not in existing.description_raw.casefold()
+        ):
+            existing.description_raw = (
+                f"{existing.description_raw.rstrip()}\n\n{candidate.description_raw}"
+            )
+
+        if not self.db or not existing.job_id:
+            return False
+        record = self.db.query(JobPosting).filter(
+            JobPosting.job_id == existing.job_id
+        ).first()
+        if not record:
+            return False
+        record.set_metadata(metadata)
+        record.description_raw = existing.description_raw
+        self.updated_existing_records = True
+        self.duplicate_job_ids_for_nlp.add(record.job_id)
+        return True
 
     def execute_goal(
         self,
@@ -686,7 +931,7 @@ class LinkedInDataCollectionAgent:
         run_id: Optional[str] = None
     ) -> AgentExecutionReport:
         """
-        Autonomously orchestrate data collection from LinkedIn and TopJobs,
+        Autonomously orchestrate data collection from LinkedIn, TopJobs, and Rooster.jobs,
         fetch complete job descriptions, perform cross-platform deduplication,
         and persist unique postings.
         """
@@ -702,11 +947,14 @@ class LinkedInDataCollectionAgent:
         # Track sources to scrape
         scrape_linkedin = any("linkedin" in s for s in sources)
         scrape_topjobs = any("topjobs" in s for s in sources)
+        scrape_rooster = any("rooster" in s for s in sources)
         active_sources_display = []
         if scrape_linkedin:
             active_sources_display.append("LinkedIn")
         if scrape_topjobs:
             active_sources_display.append("TopJobs.lk")
+        if scrape_rooster:
+            active_sources_display.append("Rooster.jobs")
 
         self._record_telemetry(
             action="INITIALIZE_MULTI_PLATFORM_GOAL",
@@ -719,17 +967,27 @@ class LinkedInDataCollectionAgent:
         db_run: Optional[DataCollectionRun] = None
         if self.db:
             try:
-                db_run = DataCollectionRun(
-                    run_id=run_id,
-                    source=",".join(active_sources_display),
-                    target_keywords=keywords,
-                    target_location=location,
-                    target_count=max_jobs,
-                    collected_count=0,
-                    duplicate_count=0,
-                    status="running"
-                )
-                self.db.add(db_run)
+                db_run = self.db.query(DataCollectionRun).filter(
+                    DataCollectionRun.run_id == run_id
+                ).first()
+                if db_run is None:
+                    db_run = DataCollectionRun(
+                        run_id=run_id,
+                        source=",".join(active_sources_display),
+                        target_keywords=keywords,
+                        target_location=location,
+                        target_count=max_jobs,
+                        collected_count=0,
+                        duplicate_count=0,
+                        status="running"
+                    )
+                    self.db.add(db_run)
+                else:
+                    db_run.source = ",".join(active_sources_display)
+                    db_run.target_keywords = keywords
+                    db_run.target_location = location
+                    db_run.target_count = max_jobs
+                    db_run.status = "running"
                 self.db.commit()
             except Exception as e:
                 logger.error("Failed to initialize DataCollectionRun in DB: %s", e)
@@ -737,6 +995,7 @@ class LinkedInDataCollectionAgent:
                     self.db.rollback()
 
         unique_collected_jobs: List[JobData] = []
+        job_ids_for_nlp: Set[str] = set()
         updated_existing_descriptions = False
         non_it_jobs_filtered = 0
         topjobs_descriptions_attempted: Set[str] = set()
@@ -746,7 +1005,12 @@ class LinkedInDataCollectionAgent:
         requests_made = 0
 
         # Quota allocation: balance between platforms
-        target_per_platform = max_jobs if len(active_sources_display) <= 1 else (max_jobs // 2) + (max_jobs % 2)
+        platform_count = len(active_sources_display)
+        target_per_platform = (
+            max_jobs
+            if platform_count <= 1
+            else (max_jobs + platform_count - 1) // platform_count
+        )
 
         # ─── 1. TopJobs.lk Collection Cycle ──────────────────────────────────
         if scrape_topjobs and len(unique_collected_jobs) < max_jobs:
@@ -773,7 +1037,11 @@ class LinkedInDataCollectionAgent:
                     image_urls = metadata.get("description_image_urls", [])
                     if isinstance(image_urls, str):
                         image_urls = [image_urls]
-                    if (existing_job.description_raw or "").strip() or image_urls:
+                    if image_urls:
+                        job_ids_for_nlp.add(existing_job.job_id)
+                    if (existing_job.description_raw or "").strip():
+                        continue
+                    if image_urls:
                         continue
                     pending_backfills.append((existing_job, metadata))
 
@@ -798,6 +1066,9 @@ class LinkedInDataCollectionAgent:
                     if image_urls:
                         metadata["description_image_urls"] = image_urls
                         existing_job.set_metadata(metadata)
+                        job_ids_for_nlp.add(existing_job.job_id)
+                    elif desc_text:
+                        job_ids_for_nlp.add(existing_job.job_id)
                     existing_job.quality_score = 100
                     updated_existing_descriptions = True
                     backfilled_descriptions += 1
@@ -824,7 +1095,7 @@ class LinkedInDataCollectionAgent:
             for tr, meta in raw_cards:
                 if len(unique_collected_jobs) >= max_jobs:
                     break
-                if scrape_linkedin and topjobs_collected_in_batch >= target_per_platform:
+                if platform_count > 1 and topjobs_collected_in_batch >= target_per_platform:
                     break
 
                 parsed_job = self.topjobs_collector.parse_job_row(tr, meta)
@@ -842,36 +1113,29 @@ class LinkedInDataCollectionAgent:
                     duplicates_skipped += 1
                     if "Cross-platform" in dup_reason:
                         cross_platform_merged += 1
-                    if (
-                        goal.fetch_full_description
-                        and self.db
-                        and parsed_job.job_id in self.memory_topjobs_missing_descriptions
-                        and parsed_job.job_id not in topjobs_descriptions_attempted
-                    ):
+                    if goal.fetch_full_description and parsed_job.job_link:
                         topjobs_descriptions_attempted.add(parsed_job.job_id)
-                        existing_job = self.db.query(JobPosting).filter(
-                            JobPosting.job_id == parsed_job.job_id,
-                            JobPosting.source == "TopJobs",
-                        ).first()
-                        if existing_job and not (existing_job.description_raw or "").strip():
-                            metadata = existing_job.get_metadata()
-                            if metadata.get("description_image_urls"):
-                                self.memory_topjobs_missing_descriptions.discard(parsed_job.job_id)
-                            else:
-                                time.sleep(random.uniform(0.8, goal.min_delay))
-                                requests_made += 1
-                                desc_text, image_urls = self.topjobs_collector.fetch_job_content(
-                                    parsed_job.job_link, headers
-                                )
-                                if desc_text or image_urls:
-                                    if desc_text:
-                                        existing_job.description_raw = desc_text
-                                    if image_urls:
-                                        metadata["description_image_urls"] = image_urls
-                                        existing_job.set_metadata(metadata)
-                                    existing_job.quality_score = 100
-                                    updated_existing_descriptions = True
-                                    self.memory_topjobs_missing_descriptions.discard(parsed_job.job_id)
+                        time.sleep(random.uniform(0.8, goal.min_delay))
+                        requests_made += 1
+                        desc_text, image_urls = self.topjobs_collector.fetch_job_content(
+                            parsed_job.job_link, headers
+                        )
+                        if desc_text:
+                            parsed_job.description_raw = desc_text
+                        if image_urls:
+                            parsed_job.raw_metadata["description_image_urls"] = image_urls
+                        matched_job, _ = self._find_duplicate_job(
+                            parsed_job, goal.similarity_threshold
+                        )
+                        if matched_job:
+                            updated_existing_descriptions = (
+                                self._merge_duplicate_source(parsed_job, matched_job)
+                                or updated_existing_descriptions
+                            )
+                            job_ids_for_nlp.add(matched_job.job_id)
+                            self.memory_topjobs_missing_descriptions.discard(
+                                matched_job.job_id
+                            )
                     logger.debug("TopJobs duplicate skipped: %s (%s)", parsed_job.title, dup_reason)
                     continue
 
@@ -888,6 +1152,7 @@ class LinkedInDataCollectionAgent:
                         parsed_job.raw_metadata["description_image_urls"] = image_urls
                     if desc_text or image_urls:
                         parsed_job.quality_score = 100
+                job_ids_for_nlp.add(parsed_job.job_id)
 
                 # Register in memory and accepted list
                 self.memory_known_ids.add(parsed_job.job_id)
@@ -904,7 +1169,71 @@ class LinkedInDataCollectionAgent:
                 status="ok"
             )
 
-        # ─── 2. LinkedIn Collection Cycle ────────────────────────────────────
+        # ─── 2. Rooster.jobs Collection Cycle ────────────────────────────────
+        if scrape_rooster and len(unique_collected_jobs) < max_jobs:
+            self._record_telemetry(
+                action="ACTIVATE_ROOSTER_CRAWLER",
+                thought=f"Searching Rooster.jobs for '{keywords}' in Sri Lanka.",
+                observation=f"Connecting to {RoosterJobsConfig.SEARCH_URL}.",
+                status="in_progress"
+            )
+            headers = self._get_random_headers()
+            raw_rooster_jobs = self.rooster_collector.fetch_listings(
+                keyword=keywords,
+                headers=headers,
+                max_jobs=max_jobs - len(unique_collected_jobs),
+                location=location,
+            )
+            requests_made += self.rooster_collector.last_request_count
+            rooster_collected_in_batch = 0
+            for item in raw_rooster_jobs:
+                if len(unique_collected_jobs) >= max_jobs:
+                    break
+                if platform_count > 1 and rooster_collected_in_batch >= target_per_platform:
+                    break
+                parsed_job = self.rooster_collector.parse_job(item, keywords)
+                if not parsed_job or not is_it_related_job(parsed_job.title):
+                    non_it_jobs_filtered += 1
+                    continue
+
+                is_dup, dup_reason = self._evaluate_and_deduplicate(
+                    parsed_job,
+                    similarity_threshold=goal.similarity_threshold,
+                )
+                if is_dup:
+                    duplicates_skipped += 1
+                    if "Cross-platform" in dup_reason:
+                        cross_platform_merged += 1
+                    if self.db:
+                        existing_job = self.db.query(JobPosting).filter(
+                            JobPosting.job_id == parsed_job.job_id,
+                            JobPosting.source == "Rooster.jobs",
+                        ).first()
+                        if existing_job and not (existing_job.description_raw or "").strip():
+                            existing_job.description_raw = parsed_job.description_raw
+                            existing_job.set_metadata(parsed_job.raw_metadata)
+                            job_ids_for_nlp.add(existing_job.job_id)
+                            updated_existing_descriptions = True
+                    continue
+
+                self.memory_known_ids.add(parsed_job.job_id)
+                self.memory_known_urls.add(parsed_job.job_link)
+                self.memory_known_jobs.append(parsed_job)
+                unique_collected_jobs.append(parsed_job)
+                job_ids_for_nlp.add(parsed_job.job_id)
+                rooster_collected_in_batch += 1
+
+            self._record_telemetry(
+                action="ROOSTER_CYCLE_COMPLETE",
+                thought="Rooster.jobs search and deduplication completed.",
+                observation=(
+                    f"Received {len(raw_rooster_jobs)} jobs; collected "
+                    f"{rooster_collected_in_batch} unique IT postings."
+                ),
+                status="ok"
+            )
+
+        # ─── 3. LinkedIn Collection Cycle ────────────────────────────────────
         if scrape_linkedin and len(unique_collected_jobs) < max_jobs:
             self._record_telemetry(
                 action="ACTIVATE_LINKEDIN_CRAWLER",
@@ -993,13 +1322,18 @@ class LinkedInDataCollectionAgent:
                     self.memory_known_urls.add(parsed_job.job_link)
                     self.memory_known_jobs.append(parsed_job)
                     unique_collected_jobs.append(parsed_job)
+                    job_ids_for_nlp.add(parsed_job.job_id)
 
                 li_offset += LinkedInConfig.JOBS_PER_PAGE
                 time.sleep(random.uniform(goal.min_delay, goal.max_delay))
 
         # ─── 3. Database Persistence & Finalization ──────────────────────────
         saved_db_count = 0
-        if self.db and (unique_collected_jobs or updated_existing_descriptions):
+        if self.db and (
+            unique_collected_jobs
+            or updated_existing_descriptions
+            or self.updated_existing_records
+        ):
             try:
                 for job in unique_collected_jobs:
                     # Check if already in DB (safety check)
@@ -1021,7 +1355,17 @@ class LinkedInDataCollectionAgent:
                         quality_score=job.quality_score,
                         description_raw=job.description_raw,
                     )
-                    record.set_metadata(job.raw_metadata)
+                    metadata = dict(job.raw_metadata)
+                    metadata.setdefault("source_platforms", [job.source])
+                    metadata.setdefault(
+                        "source_jobs",
+                        [{
+                            "source": job.source,
+                            "job_id": job.job_id,
+                            "job_link": job.job_link,
+                        }],
+                    )
+                    record.set_metadata(metadata)
                     self.db.add(record)
                     saved_db_count += 1
 
@@ -1063,6 +1407,11 @@ class LinkedInDataCollectionAgent:
             status=final_status,
             duration_seconds=duration,
             sources_scraped=active_sources_display,
+            collected_job_ids=sorted(
+                job_ids_for_nlp
+                | self.duplicate_job_ids_for_nlp
+                | {job.job_id for job in unique_collected_jobs}
+            ),
             telemetry_trace=[asdict(t) for t in self.telemetry_trace]
         )
 

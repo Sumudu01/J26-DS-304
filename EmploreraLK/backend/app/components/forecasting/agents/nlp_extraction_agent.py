@@ -359,20 +359,31 @@ class NLPExtractionAgent:
         """Process a single JobPosting instance and update its database record."""
         content = job.description_raw or ""
         current_meta = job.get_metadata()
-        if not content and job.source == "TopJobs":
+        if job.source == "TopJobs":
             image_urls = current_meta.get("description_image_urls", [])
             if isinstance(image_urls, str):
                 image_urls = [image_urls]
-            if image_urls:
-                content = extract_topjobs_image_text(image_urls) or ""
-                if content:
+            ocr_metadata = current_meta.get("description_ocr", {})
+            if not isinstance(ocr_metadata, dict):
+                ocr_metadata = {}
+            if image_urls and ocr_metadata.get("status") != "completed":
+                ocr_content = extract_topjobs_image_text(image_urls) or ""
+                if ocr_content:
+                    if ocr_content.casefold() not in content.casefold():
+                        content = f"{content.rstrip()}\n\n{ocr_content}".strip()
                     job.description_raw = content
                     current_meta["description_ocr"] = {
                         "status": "completed",
                         "image_count": len(image_urls),
                         "extracted_at": datetime.now(timezone.utc).isoformat(),
                     }
-                    job.set_metadata(current_meta)
+                else:
+                    current_meta["description_ocr"] = {
+                        "status": "no_text",
+                        "image_count": len(image_urls),
+                        "attempted_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                job.set_metadata(current_meta)
 
         title = job.title or ""
 

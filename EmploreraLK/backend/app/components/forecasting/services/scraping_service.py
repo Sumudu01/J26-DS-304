@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc, func
@@ -30,6 +31,103 @@ class ScrapingService:
     Manages background tasks, database persistence, and API query operations.
     """
 
+    @staticmethod
+    def _source_filter_condition(source: str) -> Any:
+        escaped_source = source.strip().replace('"', '\\"')
+        return or_(
+            JobPosting.source.ilike(f"%{source.strip()}%"),
+            JobPosting.raw_metadata.ilike(
+                f'%"source_platforms"%"{escaped_source}"%'
+            ),
+            JobPosting.raw_metadata.ilike(
+                f'%"source_jobs"%"{escaped_source}"%'
+            ),
+        )
+
+    @staticmethod
+    def _extract_collected_jobs(db: Session, job_ids: List[str]) -> int:
+        """Persist descriptions and extracted skills for postings from this collection."""
+        if not job_ids:
+            return 0
+
+        from app.components.forecasting.agents.nlp_extraction_agent import NLPExtractionAgent
+
+        extractor = NLPExtractionAgent(db=db)
+        processed_count = 0
+        failures = []
+        for job_id in job_ids:
+            try:
+                job = db.query(JobPosting).filter(JobPosting.job_id == job_id).first()
+                if job is None:
+                    logger.error("Collected job %s was not found for NLP extraction.", job_id)
+                    failures.append(job_id)
+                    continue
+                extractor.process_job_posting(job)
+                db.commit()
+                processed_count += 1
+            except Exception as error:
+                db.rollback()
+                failures.append(job_id)
+                logger.exception("Failed NLP extraction for collected job %s: %s", job_id, error)
+
+        if failures:
+            failed_ids = ", ".join(failures)
+            raise RuntimeError(
+                f"NLP extraction failed for {len(failures)} collected job posting(s): {failed_ids}"
+            )
+        return processed_count
+
+    @classmethod
+    def process_collected_jobs(
+        cls,
+        db: Session,
+        report: AgentExecutionReport,
+    ) -> Dict[str, Any]:
+        """Run extraction after scraping and keep the collection run status accurate."""
+        db_run = db.query(DataCollectionRun).filter(
+            DataCollectionRun.run_id == report.run_id
+        ).first()
+        if db_run:
+            db_run.status = "running"
+            db_run.error_message = None
+            db_run.completed_at = None
+            db.commit()
+
+        report_data = report.to_dict()
+        try:
+            processed_count = cls._extract_collected_jobs(db, report.collected_job_ids)
+        except Exception as error:
+            db.rollback()
+            db_run = db.query(DataCollectionRun).filter(
+                DataCollectionRun.run_id == report.run_id
+            ).first()
+            if db_run:
+                report_data["nlp_extraction"] = {
+                    "status": "failed",
+                    "error": str(error),
+                }
+                db_run.status = "failed"
+                db_run.error_message = str(error)
+                db_run.completed_at = datetime.now(timezone.utc)
+                db_run.set_summary(report_data)
+                db.commit()
+            raise
+
+        report_data["nlp_extraction"] = {
+            "status": "completed",
+            "processed_count": processed_count,
+        }
+        db_run = db.query(DataCollectionRun).filter(
+            DataCollectionRun.run_id == report.run_id
+        ).first()
+        if db_run:
+            db_run.status = report.status
+            db_run.error_message = None
+            db_run.completed_at = datetime.now(timezone.utc)
+            db_run.set_summary(report_data)
+            db.commit()
+        return report_data
+
     @classmethod
     def run_agent_in_background(cls, run_id: str, goal: AgentCollectionGoal) -> None:
         """Worker function running in background thread with a dedicated DB session."""
@@ -38,12 +136,13 @@ class ScrapingService:
             logger.info("Background thread started for agent run %s", run_id)
             agent = LinkedInDataCollectionAgent(db=db)
             report = agent.execute_goal(goal, run_id=run_id)
+            report_data = cls.process_collected_jobs(db, report)
             _ACTIVE_RUNS[run_id] = {
                 "status": report.status,
                 "collected_count": report.jobs_collected,
                 "duplicate_count": report.duplicates_skipped,
                 "cross_platform_duplicates_merged": report.cross_platform_duplicates_merged,
-                "report": report.to_dict(),
+                "report": report_data,
             }
             logger.info("Background agent run %s completed with status: %s", run_id, report.status)
         except Exception as e:
@@ -59,15 +158,16 @@ class ScrapingService:
     def trigger_collection(
         cls,
         goal: AgentCollectionGoal,
-        db: Session
+        db: Session,
+        run_id: Optional[str] = None,
     ) -> AgentRunStatus:
         """
-        Trigger an autonomous agent data collection session across LinkedIn & TopJobs.
+        Trigger an autonomous agent data collection session across configured job portals.
         If goal.background is True, starts a background thread and returns immediately.
         Otherwise executes synchronously.
         """
-        sources_label = ",".join(goal.sources) if goal.sources else "LinkedIn,TopJobs"
-        run_id = f"run_{int(time.time())}_{goal.keywords[:4].lower().replace(' ', '_')}"
+        sources_label = ",".join(goal.sources) if goal.sources else "LinkedIn,TopJobs,Rooster.jobs"
+        run_id = run_id or f"run_{int(time.time())}_{goal.keywords[:4].lower().replace(' ', '_')}"
 
         if goal.background:
             _ACTIVE_RUNS[run_id] = {
@@ -98,6 +198,7 @@ class ScrapingService:
         else:
             agent = LinkedInDataCollectionAgent(db=db)
             report: AgentExecutionReport = agent.execute_goal(goal, run_id=run_id)
+            report_data = cls.process_collected_jobs(db, report)
 
             return AgentRunStatus(
                 run_id=run_id,
@@ -109,7 +210,7 @@ class ScrapingService:
                 collected_count=report.jobs_collected,
                 duplicate_count=report.duplicates_skipped,
                 cross_platform_duplicates_merged=report.cross_platform_duplicates_merged,
-                execution_summary=report.to_dict(),
+                execution_summary=report_data,
                 error_message=report.error
             )
 
@@ -210,7 +311,7 @@ class ScrapingService:
             query = query.filter(JobPosting.company.ilike(f"%{company.strip()}%"))
 
         if source:
-            query = query.filter(JobPosting.source.ilike(f"%{source.strip()}%"))
+            query = query.filter(cls._source_filter_condition(source))
 
         total = query.count()
         offset = (page - 1) * page_size
@@ -256,7 +357,7 @@ class ScrapingService:
         query = db.query(JobPosting)
 
         if source_filter:
-            query = query.filter(JobPosting.source.ilike(f"%{source_filter.strip()}%"))
+            query = query.filter(cls._source_filter_condition(source_filter))
 
         if search_term:
             tokens = [t for t in search_term.replace("/", " ").replace(",", " ").split() if len(t) > 1] or [search_term]
@@ -306,6 +407,28 @@ class ScrapingService:
             skills = job.get_skills()
             overlap = list(user_skills_lower & set(s.lower() for s in skills)) if user_skills_lower else []
             metadata = job.get_metadata()
+            source_platforms = metadata.get("source_platforms", [])
+            if not isinstance(source_platforms, list):
+                source_platforms = []
+            source_platforms = list(dict.fromkeys(
+                [str(source) for source in source_platforms if source]
+                + [job.source]
+            ))
+            source_jobs = metadata.get("source_jobs", [])
+            if not isinstance(source_jobs, list):
+                source_jobs = []
+            source_jobs = [
+                source_job for source_job in source_jobs
+                if isinstance(source_job, dict)
+                and source_job.get("source")
+                and source_job.get("job_link")
+            ]
+            if not source_jobs:
+                source_jobs = [{
+                    "source": job.source,
+                    "job_id": job.job_id,
+                    "job_link": job.job_link,
+                }]
             description_image_urls = metadata.get("description_image_urls", [])
             if isinstance(description_image_urls, str):
                 description_image_urls = [description_image_urls]
@@ -319,6 +442,8 @@ class ScrapingService:
                 "location": job.location or "Sri Lanka",
                 "job_link": job.job_link,
                 "source": job.source,
+                "source_platforms": source_platforms,
+                "source_jobs": source_jobs,
                 "posted_date_text": job.posted_date_text,
                 "posted_timestamp": job.posted_timestamp.isoformat() if job.posted_timestamp else None,
                 "skills_extracted": skills,
@@ -351,9 +476,10 @@ class ScrapingService:
     ) -> Dict[str, Any]:
         """
         Trigger the full 4-agent pipeline in background:
-        1. Data Collection Agent (LinkedIn + TopJobs)
+        1. Data Collection Agent (LinkedIn + TopJobs + Rooster.jobs)
         2. NLP Extraction Agent
         3. Skill Processing Agent
+        4. Job Posting Time-Series Agent
         Returns a pipeline run summary with individual run IDs.
         """
         from app.schemas.job_posting import AgentCollectionGoal
@@ -361,6 +487,10 @@ class ScrapingService:
         from app.schemas.skill_processing import SkillProcessingGoal
         from app.components.forecasting.services.nlp_service import NLPService
         from app.components.forecasting.services.skill_processing_service import SkillProcessingService
+        from app.components.forecasting.services.forecasting_service import ForecastingService
+        from app.components.forecasting.agents.job_posting_time_series_agent import (
+            JobPostingTimeSeriesAgent,
+        )
 
         import time
         pipeline_id = f"pipeline_{int(time.time())}_{target_role[:6].lower().replace(' ', '_')}"
@@ -374,7 +504,7 @@ class ScrapingService:
                 location=location,
                 max_jobs=max_jobs,
                 background=True,
-                sources=["LinkedIn", "TopJobs"],
+                sources=["LinkedIn", "TopJobs", "Rooster.jobs"],
                 fetch_full_description=True,
                 min_delay=1.0,   # Reduced from 2.0 — still polite but 2x faster
                 max_delay=2.5,   # Reduced from 4.0
@@ -442,6 +572,41 @@ class ScrapingService:
             except Exception as e3:
                 logger.error("Pipeline stage 3 (skill processing) failed: %s", e3)
                 results["stages"]["skill_processing"] = {"status": "failed", "error": str(e3)}
+            try:
+                time_series = JobPostingTimeSeriesAgent.get_series(
+                    _db3,
+                    days=730,
+                    interval="month",
+                )
+                results["stages"]["time_series"] = {
+                    "status": "completed",
+                    "total_dated_jobs": time_series["total_dated_jobs"],
+                    "interval": time_series["interval"],
+                    "points": len(time_series["points"]),
+                }
+            except Exception as e4:
+                logger.exception("Pipeline stage 4 (time-series aggregation) failed: %s", e4)
+                results["stages"]["time_series"] = {
+                    "status": "failed",
+                    "error": str(e4),
+                }
+            try:
+                forecast = ForecastingService.train_and_store(
+                    _db3,
+                    horizon_months=36,
+                )
+                results["stages"]["demand_forecast"] = {
+                    "status": "completed",
+                    "run_id": forecast["run_id"],
+                    "best_model": forecast["best_model"],
+                    "series_count": len(forecast["series"]),
+                }
+            except Exception as forecast_error:
+                logger.exception("Pipeline stage 5 (demand forecasting) failed")
+                results["stages"]["demand_forecast"] = {
+                    "status": "failed",
+                    "error": str(forecast_error),
+                }
             finally:
                 _db3.close()
 
@@ -451,7 +616,8 @@ class ScrapingService:
         results["status"] = "running"
         results["message"] = (
             f"Full pipeline triggered for '{target_role}'. "
-            "Data Collection → NLP Extraction → Skill Processing running autonomously."
+            "Data Collection → NLP Extraction → Skill Processing → Time-Series Analysis → "
+            "Model Evaluation and Demand Forecasting running autonomously."
         )
         return results
 

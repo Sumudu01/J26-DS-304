@@ -11,6 +11,10 @@ from app.schemas.job_posting import (
 )
 from app.components.forecasting.services.scraping_service import ScrapingService
 from app.components.forecasting.services.forecasting_service import ForecastingService
+from app.components.forecasting.agents.job_posting_time_series_agent import (
+    JobPostingTimeSeriesAgent,
+    TimeSeriesInterval,
+)
 
 logger = logging.getLogger("emploreralk.api.forecast")
 
@@ -21,10 +25,11 @@ router = APIRouter(prefix="/forecast", tags=["Forecasting & Data Collection"])
     "/jobs/collect",
     response_model=AgentRunStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger Autonomous LinkedIn Data Collection Agent",
+    summary="Trigger Autonomous Job Data Collection Agent",
     description=(
         "Deploys the autonomous data collection agent to search, parse, "
-        "deduplicate, and persist job posts from LinkedIn based on specified keywords and location."
+        "deduplicate, and persist job posts from LinkedIn, TopJobs, and Rooster.jobs. After collection, "
+        "job descriptions and skills are extracted and saved; TopJobs advert images are OCRed."
     )
 )
 def trigger_data_collection(
@@ -84,7 +89,7 @@ def list_collected_jobs(
     keyword: Optional[str] = Query(None, description="Search keyword in title, tag, or description"),
     location: Optional[str] = Query(None, description="Filter by location"),
     company: Optional[str] = Query(None, description="Filter by company name"),
-    source: Optional[str] = Query(None, description="Filter by portal source: 'LinkedIn' or 'TopJobs'"),
+    source: Optional[str] = Query(None, description="Filter by portal source: 'LinkedIn', 'TopJobs', or 'Rooster.jobs'"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(25, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db)
@@ -114,6 +119,23 @@ def get_collection_stats(
 
 
 @router.get(
+    "/jobs/time-series",
+    response_model=Dict[str, Any],
+    summary="Get job-posting and skill time series",
+    description=(
+        "Aggregate dated job postings and extracted skills over up to 730 days. "
+        "Includes the newest and older postings available in the database."
+    ),
+)
+def get_job_posting_time_series(
+    days: int = Query(730, ge=1, le=730),
+    interval: TimeSeriesInterval = Query("month"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return JobPostingTimeSeriesAgent.get_series(db, days=days, interval=interval)
+
+
+@router.get(
     "/demand-insights",
     response_model=Dict[str, Any],
     summary="Forecast emerging and declining job-market skills",
@@ -127,6 +149,81 @@ def get_demand_insights(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     return ForecastingService.get_demand_insights(db=db, target_year=target_year)
+
+
+@router.get(
+    "/demand-forecast",
+    response_model=Dict[str, Any],
+    summary="Get the latest persisted multi-model job-market forecast",
+    description="Return model evaluations and monthly emerging/declining skill and role forecasts for up to 36 months.",
+)
+def get_demand_forecast(
+    horizon_months: int = Query(36, ge=1, le=36),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    result = ForecastingService.get_latest_forecast(
+        db,
+        horizon_months=horizon_months,
+    )
+    return result or {
+        "available": False,
+        "message": "No model forecast is stored yet. Start a forecast run to train the models.",
+    }
+
+
+@router.post(
+    "/demand-forecast/train",
+    response_model=Dict[str, Any],
+    summary="Train, evaluate, and persist demand forecasting models",
+    description="Evaluate ARIMA, Prophet, N-BEATS, and TFT on a temporal holdout, then select the best model per skill and role.",
+)
+def train_demand_forecast(
+    horizon_months: int = Query(36, ge=1, le=36),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    try:
+        ForecastingService.train_and_store(
+            db,
+            horizon_months=36,
+        )
+        result = ForecastingService.get_latest_forecast(
+            db,
+            horizon_months=horizon_months,
+        )
+        if result is None:
+            raise RuntimeError("Forecast training completed without a saved result")
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.error("No demand forecasting model could be trained: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Demand forecasting run failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Demand forecasting failed. See backend logs for details.",
+        ) from exc
+
+
+@router.get(
+    "/demand-forecast/history",
+    response_model=List[Dict[str, Any]],
+    summary="Browse stored forecast knowledge",
+    description="List previous persisted model evaluations and generated forecast insights.",
+)
+def get_demand_forecast_history(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    return ForecastingService.get_forecast_history(db, limit=limit)
 
 
 # ─── NLP Skill Extraction Agent Endpoints ────────────────────────────────────
@@ -346,14 +443,14 @@ def get_skill_co_occurrences(
     description=(
         "Returns real-time job postings from the database matched to the user's target role "
         "and skill profile. Jobs are scored by skill-overlap and sorted by relevance then recency. "
-        "Sourced from LinkedIn & TopJobs via the autonomous 4-agent pipeline."
+        "Sourced from LinkedIn, TopJobs, and Rooster.jobs via the autonomous pipeline."
     ),
 )
 def get_recommended_jobs(
     target_role: Optional[str] = Query(None, description="User's target job role (from profile)"),
     skills: Optional[str] = Query(None, description="Comma-separated user skills for overlap scoring"),
     keyword: Optional[str] = Query(None, description="Free-text job title or skill keyword"),
-    source: Optional[str] = Query(None, description="Filter by source platform: LinkedIn or TopJobs"),
+    source: Optional[str] = Query(None, description="Filter by source platform: LinkedIn, TopJobs, or Rooster.jobs"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=50, description="Results per page"),
     db: Session = Depends(get_db),

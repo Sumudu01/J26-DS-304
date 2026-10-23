@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     PORT: int = 5000
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:5000,*"
+    JOB_SCRAPER_ENABLED: bool = True
+    JOB_SCRAPER_INTERVAL_MINUTES: int = 15
 
     # Google OAuth2
     GOOGLE_CLIENT_ID: str = ""
@@ -59,4 +61,3 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
-

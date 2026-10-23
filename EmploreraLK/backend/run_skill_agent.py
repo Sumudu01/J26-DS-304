@@ -62,7 +62,7 @@ def main() -> None:
         "--source",
         type=str,
         default=None,
-        help="Filter job postings by source platform ('LinkedIn', 'TopJobs')",
+        help="Filter job postings by source platform ('LinkedIn', 'TopJobs', 'Rooster.jobs')",
     )
     parser.add_argument(
         "--fuzzy-threshold",

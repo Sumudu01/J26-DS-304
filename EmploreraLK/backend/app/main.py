@@ -16,6 +16,9 @@ from app.components.skill_gap.models import ensure_candidate_ownership_columns
 from app.core.security import get_password_hash
 from app.api.v1 import api_router
 from app.api.v1.matching import warm_embedding_model
+from app.components.forecasting.services.job_collection_scheduler import (
+    LiveJobCollectionScheduler,
+)
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -106,6 +109,13 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    scheduler = None
+    if settings.JOB_SCRAPER_ENABLED:
+        scheduler = LiveJobCollectionScheduler(
+            interval_minutes=settings.JOB_SCRAPER_INTERVAL_MINUTES
+        )
+        scheduler.start()
+
     logger.info(
         "EmploreraLK API is ready on http://%s:%s",
         settings.HOST,
@@ -119,6 +129,8 @@ async def lifespan(app: FastAPI):
     warm_embedding_model()
 
     yield
+    if scheduler:
+        scheduler.stop()
     logger.info("EmploreraLK API shutting down.")
 
 
@@ -190,4 +202,3 @@ async def health_check() -> dict:
         "version": "1.0.0",
         "environment": settings.ENVIRONMENT,
     }
-

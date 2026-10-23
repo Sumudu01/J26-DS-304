@@ -1,0 +1,23 @@
+# Local Python environments (may contain PyTorch and other multi-GB packages)
+.venv/
+venv/
+env/
+ENV/
+**/.venv/
+**/venv/
+
+# Local build, test, and runtime artifacts
+.vercel/
+.pytest_cache/
+**/.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Development-only files are not used by the API function
+tests/
+notebooks/

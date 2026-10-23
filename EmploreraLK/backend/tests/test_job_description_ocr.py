@@ -83,7 +83,8 @@ class JobDescriptionOCRTests(unittest.TestCase):
         self.assertIsNone(result)
         image_to_string.assert_not_called()
 
-    def test_missing_python_dependency_has_install_guidance(self):
+    @patch("app.components.forecasting.agents.job_description_ocr.requests.get")
+    def test_missing_python_dependency_skips_optional_ocr(self, get):
         original_import = __import__
 
         def without_pytesseract(name, *args, **kwargs):
@@ -91,9 +92,14 @@ class JobDescriptionOCRTests(unittest.TestCase):
                 raise ModuleNotFoundError("No module named 'pytesseract'")
             return original_import(name, *args, **kwargs)
 
+        get.return_value = self.response(self.png_bytes())
         with patch("builtins.__import__", side_effect=without_pytesseract):
-            with self.assertRaisesRegex(RuntimeError, "Install backend requirements"):
-                job_description_ocr._load_ocr_dependencies()
+            result = extract_topjobs_image_text(
+                ["https://www.topjobs.lk/logo/DEFZZZ/ad.png"]
+            )
+
+        self.assertIsNone(result)
+        get.assert_not_called()
 
 
 if __name__ == "__main__":
