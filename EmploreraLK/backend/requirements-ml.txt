@@ -1,6 +1,15 @@
-# Optional local/worker dependencies for NLP and BGE-M3 embeddings.
+# Optional local/worker dependencies for NLP and Component 4 matching
+# (BGE-M3 embeddings, FAISS retrieval, Cross-Encoder reranking).
 # Keep these out of Vercel's serverless function dependency set.
-sentence-transformers>=3.0.0
+# Install: pip install -r requirements.txt -r requirements-ml.txt
+
+# CPU-only PyTorch wheels; avoids the multi-GB CUDA build on Linux.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2.0
+# >=4.0 needed: CrossEncoder(cache_folder=..., local_files_only=...) is used for reranking.
+sentence-transformers>=4.0.0
+faiss-cpu>=1.8.0
+numpy>=1.26.0
 sentencepiece>=0.2.0
 protobuf>=5.0.0
 prophet>=1.1.5
